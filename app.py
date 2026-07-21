@@ -9,6 +9,9 @@
   4) 화면에서 검수/수정하고
   5) 실제 셀에 반영한 엑셀 파일을 다운로드한다.
 
+추가로, 완성된 리포트 파일을 올리면 시트/채널/브랜드별 주차 추이 그래프와
+비교 그래프를 보여주는 성과 대시보드도 제공한다.
+
 Anthropic API 키가 필요 없는 완전 무료 버전. 문장은 규칙 기반이라 다소 정형화되어 있음 —
 필요하면 화면에서 직접 다듬을 수 있다.
 """
@@ -18,6 +21,7 @@ from datetime import datetime
 
 import streamlit as st
 import openpyxl
+import pandas as pd
 
 import raw_to_report
 
@@ -125,6 +129,51 @@ def build_brief(wb):
         if sheet_brief:
             brief[sheet_name] = sheet_brief
     return brief
+
+
+def build_full_series(wb):
+    """대시보드용: 시트/채널·브랜드별 '전체' 주차 시계열 데이터를 추출한다.
+
+    build_brief는 최신 2개 주만 비교하지만, 대시보드는 추이 그래프를 그려야 하므로
+    데이터가 채워진 모든 주차를 가져온다. (진행 중이라 비어있는 주는 제외)
+    """
+    series = {}
+    for sheet_name, keywords in SHEET_GROUP_KEYWORDS.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        tables = find_group_tables(ws)
+        sheet_series = {}
+        for gname, rows in tables.items():
+            if gname is None:
+                continue
+            matched_kw = next((kw for kw in keywords if kw in gname), None)
+            if not matched_kw or matched_kw in sheet_series:
+                continue
+            pts = []
+            for r, label, vals in rows:
+                imps, clicks, ctr, cpc, cost, trans, sales, cpa, cvr, roas = vals
+                if (imps in (None, 0)) and (sales in (None, 0)) and (cost in (None, 0)):
+                    continue  # 진행 중이거나 비어있는 주는 제외
+                pts.append({
+                    'WEEK': label,
+                    'IMPS': imps or 0, 'CLICK': clicks or 0, 'CTR': (ctr or 0) * 100,
+                    'CPC': cpc or 0, 'COST': cost or 0, 'TRANS': trans or 0,
+                    'SALES': sales or 0, 'CPA': cpa or 0, 'CVR': (cvr or 0) * 100,
+                    'ROAS': (roas or 0) * 100,
+                })
+            if pts:
+                sheet_series[matched_kw] = pts
+        if sheet_series:
+            series[sheet_name] = sheet_series
+    return series
+
+
+METRIC_LABELS = {
+    'IMPS': 'IMPS (노출)', 'CLICK': 'CLICK (클릭)', 'CTR': 'CTR (%)', 'CPC': 'CPC (원)',
+    'COST': 'COST (원, -vat)', 'TRANS': 'TRANS (구매완료수)', 'SALES': 'SALES (매출액, 원)',
+    'CPA': 'CPA (원)', 'CVR': 'CVR (%)', 'ROAS': 'ROAS (%)',
+}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -242,6 +291,7 @@ mode = st.radio(
         "① 로우데이터 + 지난 리포트 파일 → 서식 그대로 이어서 업데이트 (추천)",
         "② 로우데이터만 → 새 리포트 생성 (서식 없이 데이터만)",
         "③ 이미 만들어진 리포트 파일 → 코멘트만 작성",
+        "④ 성과 대시보드 보기 (주차별 추이 · 채널/브랜드 비교)",
     ],
 )
 
@@ -278,6 +328,64 @@ elif mode.startswith("②"):
             wb_generated.save(buf)
             file_bytes = buf.getvalue()
         st.success("리포트 생성 완료! 아래에서 이어서 특이사항을 입력하고 코멘트를 생성하세요.")
+
+elif mode.startswith("④"):
+    st.caption("숫자가 채워진 리포트 파일을 올리면 시트·채널/브랜드별 주차 추이와 비교 그래프를 보여줍니다. "
+               "(엑셀에서 한 번 열어 저장한 파일을 올리면 더 정확합니다)")
+    dash_uploaded = st.file_uploader("리포트 파일 업로드 (.xlsx)", type="xlsx", key="dash_uploader")
+
+    if dash_uploaded:
+        wb_dash = openpyxl.load_workbook(io.BytesIO(dash_uploaded.getvalue()), data_only=True)
+        series = build_full_series(wb_dash)
+
+        if not series:
+            st.error("지원하는 시트(NAVER GFA_Conf / NAVER GFA_Pet / NAVER BS_Pet)에서 데이터를 찾지 못했습니다. "
+                     "엑셀에서 파일을 한 번 열어 저장한 뒤 다시 업로드해보세요.")
+        else:
+            sheet_pick = st.selectbox("시트 선택", list(series.keys()), key="dash_sheet")
+            groups_data = series[sheet_pick]
+
+            st.subheader("📈 주차별 추이")
+            metric_trend = st.selectbox(
+                "지표 선택", list(METRIC_LABELS.keys()),
+                format_func=lambda k: METRIC_LABELS[k], key="trend_metric",
+            )
+            default_group = ['TOTAL'] if 'TOTAL' in groups_data else list(groups_data.keys())[:1]
+            group_pick = st.multiselect(
+                "채널/브랜드 선택 (복수 선택 가능)", list(groups_data.keys()),
+                default=default_group, key="trend_groups",
+            )
+            if group_pick:
+                trend_df = None
+                for g in group_pick:
+                    df_g = pd.DataFrame(groups_data[g]).set_index('WEEK')[[metric_trend]].rename(columns={metric_trend: g})
+                    trend_df = df_g if trend_df is None else trend_df.join(df_g, how='outer')
+                st.line_chart(trend_df)
+            else:
+                st.info("채널/브랜드를 1개 이상 선택해주세요.")
+
+            st.divider()
+            st.subheader("📊 채널/브랜드 비교 (특정 주차 기준)")
+            order_source = groups_data.get('TOTAL') or next(iter(groups_data.values()))
+            all_weeks = [p['WEEK'] for p in order_source]
+            week_pick = st.selectbox("비교할 주차 선택", all_weeks, index=len(all_weeks) - 1, key="compare_week")
+            metric_compare = st.selectbox(
+                "지표 선택", list(METRIC_LABELS.keys()),
+                format_func=lambda k: METRIC_LABELS[k], key="compare_metric",
+            )
+            compare_rows = []
+            for g, pts in groups_data.items():
+                if g == 'TOTAL':
+                    continue
+                match = next((p for p in pts if p['WEEK'] == week_pick), None)
+                if match:
+                    compare_rows.append({'그룹': g, metric_compare: match[metric_compare]})
+            if compare_rows:
+                compare_df = pd.DataFrame(compare_rows).set_index('그룹')
+                st.bar_chart(compare_df)
+            else:
+                st.info("선택한 주차에는 채널/브랜드별 데이터가 없습니다.")
+    st.stop()
 
 else:
     uploaded = st.file_uploader("이번 주 리포트 파일 업로드 (.xlsx)", type="xlsx", key="report_uploader")
