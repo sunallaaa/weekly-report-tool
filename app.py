@@ -1,26 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-주간 광고 리포트 코멘트 자동화 앱 (Streamlit)
+주간 광고 리포트 코멘트 자동화 앱 (Streamlit) — 완전 무료 버전 (API 키 불필요)
 
-이번 주 리포트 파일(.xlsx)을 업로드하면:
+로우데이터 또는 완성된 리포트 파일(.xlsx)을 업로드하면:
   1) 시트별 브랜드/채널 WEEK 테이블에서 최신 주 vs 직전 주 수치를 스스로 찾아 증감률을 계산하고
   2) 화면에서 이번 주 특이사항(타임딜, 브랜드데이 등)을 입력받아
-  3) Claude API로 기존 코멘트와 동일한 톤/형식의 문장을 생성한 뒤
+  3) 증감률 크기에 따라 미리 정해둔 문구 패턴을 조합해 코멘트 문장을 만든 뒤
   4) 화면에서 검수/수정하고
   5) 실제 셀에 반영한 엑셀 파일을 다운로드한다.
 
-배포: Streamlit Community Cloud (무료) 사용을 권장. 같은 폴더의 배포방법.md 참고.
+Anthropic API 키가 필요 없는 완전 무료 버전. 문장은 규칙 기반이라 다소 정형화되어 있음 —
+필요하면 화면에서 직접 다듬을 수 있다.
 """
 import io
 import re
-import json
 from datetime import datetime
 
 import streamlit as st
 import openpyxl
 
+import raw_to_report
+
 # ─────────────────────────────────────────────────────────────
-# 1) 시트 구조 설정 — 매주 파일을 복사/이름변경만 하는 구조라 그대로 재사용 가능
+# 1) 시트 구조 설정
 # ─────────────────────────────────────────────────────────────
 SHEET_GROUP_KEYWORDS = {
     'NAVER GFA_Conf': ['TOTAL', 'ADVoost', 'NDA', '쇼핑프로모션'],
@@ -28,47 +30,22 @@ SHEET_GROUP_KEYWORDS = {
     'NAVER BS_Pet':   ['TOTAL', '그리니즈', '시저', '템테이션', '쉬바', '위스카스'],
 }
 
-# 그룹별로 코멘트가 들어가는 셀 좌표 (파일 레이아웃 고정 — 매주 동일)
 CELL_MAP = {
     'NAVER GFA_Conf': {
-        'TOTAL': ['B6', 'B7'],
-        'ADVoost': ['B10', 'B11'],
-        'NDA': ['B14', 'B15'],
+        'TOTAL': ['B6', 'B7'], 'ADVoost': ['B10', 'B11'], 'NDA': ['B14', 'B15'],
         '쇼핑프로모션': ['B18', 'B19', 'B20'],
     },
     'NAVER GFA_Pet': {
-        'TOTAL': ['B6', 'B7'],
-        'ADVoost': ['B10'],
-        'NDA': ['B13'],
-        '쇼핑프로모션': ['B16', 'B17', 'B18'],
-        '스마트채널': ['B21', 'B22'],
+        'TOTAL': ['B6', 'B7'], 'ADVoost': ['B10'], 'NDA': ['B13'],
+        '쇼핑프로모션': ['B16', 'B17', 'B18'], '스마트채널': ['B21', 'B22'],
     },
     'NAVER BS_Pet': {
-        'TOTAL': ['B6', 'B7'],
-        '그리니즈': ['B9'],
-        '시저': ['B11'],
-        '템테이션': ['B13'],
-        '쉬바': ['B15'],
-        '위스카스': ['B17'],
+        'TOTAL': ['B6', 'B7'], '그리니즈': ['B9'], '시저': ['B11'],
+        '템테이션': ['B13'], '쉬바': ['B15'], '위스카스': ['B17'],
     },
 }
 
-# 스타일 예시 (실제로 이미 사용한 2주차 코멘트 — Claude에게 톤/형식 참고용으로 제공)
-STYLE_EXAMPLES = {
-    'NAVER BS_Pet': {
-        'TOTAL': ["7월 2주차 매출액 1,844만원 확보하며 ROAS 1,613% 기록, 전주 대비 매출 80% 이상 증가",
-                   "7/13 브랜드데이에 이어 15일 저녁~16일 새벽 위스카스 타임딜, 19일 그리니즈 타임딜 소재 운영 영향으로 전 브랜드 CTR·CVR·ROAS 동반 개선"],
-        '위스카스': ["5. 위스카스 : 노출 5% 증가, 유입 33% 증가, CPC 25% 하락(2,074원→1,556원)하며 주간 매출액 281만원 확보 (전주 대비 174% 증가, 전 브랜드 중 최대 성장폭) — 15일 저녁~16일 새벽 타임딜 운영이 주요 동인, ROAS 550%→1,506% 기록"],
-    },
-    'NAVER GFA_Pet': {
-        'TOTAL': ["7/10~13 브랜드데이 소재 운영 효과가 2주차 데이터에 본격 반영되며 전체 매출액 4,721만원 확보",
-                   "전주 대비 매출 166% 증가, 전환수 366건→1,080건(+195%)으로 급증하며 ROAS 521%→1,385%로 큰 폭 개선"],
-    },
-    'NAVER GFA_Conf': {
-        'TOTAL': ["넾다세일 종료 여파 지속되며 노출 확대에도 전환 효율 하락, 주간 매출액 1,241만원으로 전주 대비 23% 감소하며 ROAS 965%→742%로 하락",
-                   "→ ADVoost 대비 NDA·쇼핑프로모션에서 전환 감소폭이 더 크게 나타나며 전체 평균 매출 감소에 영향"],
-    },
-}
+BS_PET_BRAND_NUMBER = {'그리니즈': 1, '시저': 2, '템테이션': 3, '쉬바': 4, '위스카스': 5}
 
 WEEK_RE = re.compile(r'^\d+월\s*\d+주차\s*\(')
 BAD_LABELS = {'WEEK', 'IMPS', 'CLICK', 'CTR', 'CPC', 'COST (-vat)',
@@ -78,7 +55,7 @@ COLS = ['IMPS', 'CLICK', 'CTR', 'CPC', 'COST', 'TRANS', 'SALES', 'CPA', 'CVR', '
 
 
 # ─────────────────────────────────────────────────────────────
-# 2) 데이터 추출 (extract_weekly_brief.py와 동일한 로직)
+# 2) 데이터 추출
 # ─────────────────────────────────────────────────────────────
 def nearest_group_label(ws, row):
     for rr in range(row, max(row - 40, 0), -1):
@@ -151,61 +128,103 @@ def build_brief(wb):
 
 
 # ─────────────────────────────────────────────────────────────
-# 3) Claude API로 코멘트 문장 생성
+# 3) 규칙 기반 코멘트 문장 생성 (API 키 불필요)
 # ─────────────────────────────────────────────────────────────
-def build_prompt(sheet_name, sheet_brief):
-    cell_map = CELL_MAP[sheet_name]
-    examples = STYLE_EXAMPLES.get(sheet_name, {})
-
-    lines = [f"시트: {sheet_name}", "", "아래는 이번 주(최신 주) vs 직전 주 데이터와 담당자가 입력한 특이사항이다.", ""]
-    for group, data in sheet_brief.items():
-        if group not in cell_map:
-            continue
-        lines.append(f"[{group}] {data['prev_week']} → {data['curr_week']}")
-        for col, m in data['metrics'].items():
-            lines.append(f"  {col}: {m['prev']} → {m['curr']} ({m['pct_change']}%)")
-        if data['user_note']:
-            lines.append(f"  담당자 특이사항: {data['user_note']}")
-        lines.append(f"  필요한 줄 수: {len(cell_map[group])}줄 (셀: {', '.join(cell_map[group])})")
-        if group in examples:
-            lines.append(f"  참고 예시(지난 주 실제 작성 문장, 톤/형식만 참고): {json.dumps(examples[group], ensure_ascii=False)}")
-        lines.append("")
-
-    lines.append(
-        "위 데이터로 한국어 광고 성과 리포트 코멘트를 작성하라. "
-        "규칙: (1) 숫자는 반드시 주어진 데이터에서만 사용하고 지어내지 말 것 "
-        "(2) ROAS는 소수×100을 '%'로 표기 (예: 8.93 → '893%') "
-        "(3) 매출은 '만원' 단위, 원 단위는 CPC/CPA에만 사용 "
-        "(4) 담당자 특이사항이 있으면 자연스럽게 근거로 녹여 쓸 것 "
-        "(5) 그룹별로 지정된 줄 수를 정확히 지킬 것 (한 줄 = 한 문장 정도) "
-        "(6) 마지막 문장에는 반드시 ROAS 이전→이후 흐름을 명시할 것. "
-        "출력은 아래 JSON 형식만 반환 (설명, 마크다운 코드펜스 없이 순수 JSON):\n"
-        '{"셀좌표": "문장", ...}  — 예: {"B6": "...", "B7": "..."}'
-    )
-    return "\n".join(lines)
+def manwon(v):
+    return f"{round(v / 10000):,}"
 
 
-def generate_comments_with_claude(brief, api_key, model="claude-sonnet-5"):
-    from anthropic import Anthropic
-    client = Anthropic(api_key=api_key)
+def pct100(ratio):
+    return f"{round(ratio * 100)}%"
 
+
+def change_phrase(pct_change, noun, up_word='증가', down_word='감소'):
+    if pct_change is None:
+        return f"{noun} 변동 없음"
+    if abs(pct_change) < 1:
+        return f"{noun} 소폭 변동"
+    direction = up_word if pct_change > 0 else down_word
+    return f"{noun} {abs(pct_change):.0f}% {direction}"
+
+
+def summary_sentence_1(m, label_curr):
+    sales = m['SALES']['curr']
+    roas = m['ROAS']['curr']
+    sales_pct = m['SALES']['pct_change']
+    trend = "증가" if (sales_pct or 0) >= 0 else "감소"
+    return (f"{label_curr} 매출액 {manwon(sales)}만원 확보하며 ROAS {pct100(roas)} 기록, "
+            f"전주 대비 매출 {abs(sales_pct or 0):.0f}% {trend}")
+
+
+def summary_sentence_2(m, note):
+    # 가장 크게 움직인 효율 지표 하나를 골라 설명
+    candidates = [('CTR', 'CTR'), ('CPC', 'CPC'), ('CVR', 'CVR')]
+    best = max(candidates, key=lambda kv: abs(m[kv[0]]['pct_change'] or 0))
+    key, label = best
+    phrase = change_phrase(m[key]['pct_change'], label)
+    roas_prev, roas_curr = pct100(m['ROAS']['prev']), pct100(m['ROAS']['curr'])
+    base = f"{phrase}하며 ROAS {roas_prev}→{roas_curr} 흐름"
+    if note:
+        base = f"{note} 영향으로 {base}"
+    return base
+
+
+def group_line(m, note, brand_label=None, num=None):
+    imps_p = change_phrase(m['IMPS']['pct_change'], '노출')
+    clicks_p = change_phrase(m['CLICK']['pct_change'], '유입')
+    cpc_p = change_phrase(m['CPC']['pct_change'], 'CPC', up_word='상승', down_word='하락')
+    sales = manwon(m['SALES']['curr'])
+    roas_prev, roas_curr = pct100(m['ROAS']['prev']), pct100(m['ROAS']['curr'])
+    prefix = f"{num}. {brand_label} : " if (brand_label and num) else ""
+    line = f"{prefix}{imps_p}, {clicks_p}, {cpc_p}하며 주간 매출액 {sales}만원 확보, ROAS {roas_prev}→{roas_curr} 기록"
+    if note:
+        line += f" ({note})"
+    return line
+
+
+def extra_detail_line(m, note):
+    trans_p = change_phrase(m['TRANS']['pct_change'], '전환수')
+    cvr_p = change_phrase(m['CVR']['pct_change'], 'CVR', up_word='개선', down_word='하락')
+    line = f"{trans_p}, {cvr_p}"
+    if note:
+        line += f" — {note}"
+    return line
+
+
+def generate_comments_rule_based(brief):
+    """API 호출 없이, 증감률 크기에 따라 정해둔 문구 패턴을 조합해 셀별 문장을 만든다."""
     all_comments = {}
     for sheet_name, sheet_brief in brief.items():
         if sheet_name not in CELL_MAP:
             continue
-        prompt = build_prompt(sheet_name, sheet_brief)
-        resp = client.messages.create(
-            model=model,
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
-        text = re.sub(r'^```(json)?|```$', '', text.strip(), flags=re.MULTILINE).strip()
-        try:
-            cell_texts = json.loads(text)
-        except json.JSONDecodeError:
-            cell_texts = {}
-            st.warning(f"[{sheet_name}] Claude 응답을 JSON으로 파싱하지 못했습니다. 원문:\n{text}")
+        cell_texts = {}
+        cell_map = CELL_MAP[sheet_name]
+
+        for group, cells in cell_map.items():
+            if group not in sheet_brief:
+                continue
+            data = sheet_brief[group]
+            m = data['metrics']
+            note = data.get('user_note', '')
+
+            if group == 'TOTAL':
+                lines = [summary_sentence_1(m, data['curr_week']), summary_sentence_2(m, note)]
+            elif sheet_name == 'NAVER BS_Pet':
+                num = BS_PET_BRAND_NUMBER.get(group)
+                lines = [group_line(m, note, brand_label=group, num=num)]
+            else:
+                lines = [group_line(m, note), extra_detail_line(m, note)]
+                if len(cells) >= 3:
+                    lines.append(f"→ {group} 채널, 다음 주에도 동일 기조 유지 제안" if not note
+                                 else f"→ {note} 관련 소재/운영 지속 제안")
+
+            for cell, text in zip(cells, lines):
+                cell_texts[cell] = text
+            # 셀 수가 더 많으면 마지막 문장을 채워 넣음
+            if len(cells) > len(lines):
+                for c in cells[len(lines):]:
+                    cell_texts[c] = lines[-1] if lines else ''
+
         all_comments[sheet_name] = cell_texts
     return all_comments
 
@@ -213,15 +232,9 @@ def generate_comments_with_claude(brief, api_key, model="claude-sonnet-5"):
 # ─────────────────────────────────────────────────────────────
 # 4) Streamlit 화면
 # ─────────────────────────────────────────────────────────────
-import raw_to_report
-
 st.set_page_config(page_title="주간 리포트 코멘트 자동화", layout="wide")
-st.title("📊 주간 광고 리포트 자동화")
-st.caption("로우데이터 또는 완성된 리포트 파일을 올리면, 데이터 분석 → 특이사항 반영 → 코멘트 자동 작성까지 진행합니다.")
-
-api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-if not api_key:
-    api_key = st.text_input("Anthropic API 키 (Streamlit Secrets에 등록하면 이 입력창은 안 보입니다)", type="password")
+st.title("📊 주간 광고 리포트 자동화 (무료 버전)")
+st.caption("로우데이터 또는 완성된 리포트 파일을 올리면, 데이터 분석 → 특이사항 반영 → 코멘트 자동 작성까지 진행합니다. API 키가 필요 없습니다.")
 
 mode = st.radio(
     "무엇을 업로드하시나요?",
@@ -264,16 +277,12 @@ if file_bytes:
                     key = f"note_{sheet_name}_{group}"
                     notes[(sheet_name, group)] = st.text_input(group, key=key, placeholder="예: 15일 타임딜 운영")
 
-        if st.button("② 코멘트 생성", type="primary", disabled=not api_key):
+        if st.button("② 코멘트 생성", type="primary"):
             for (sheet_name, group), memo in notes.items():
                 if memo and memo.strip():
                     brief[sheet_name][group]['user_note'] = memo.strip()
-            with st.spinner("Claude가 코멘트를 작성하는 중..."):
-                st.session_state['comments'] = generate_comments_with_claude(brief, api_key)
-                st.session_state['file_bytes'] = file_bytes
-
-        if not api_key:
-            st.info("API 키를 입력해야 코멘트 생성 버튼이 활성화됩니다.")
+            st.session_state['comments'] = generate_comments_rule_based(brief)
+            st.session_state['file_bytes'] = file_bytes
 
 if 'comments' in st.session_state:
     st.subheader("③ 생성된 코멘트 검수 (필요시 직접 수정)")
@@ -290,7 +299,7 @@ if 'comments' in st.session_state:
             ws = wb_out[sheet_name]
             for cell, text in cell_texts.items():
                 ws[cell] = text
-        wb_out.calculation.fullCalcOnLoad = True  # 엑셀에서 열면 자동 재계산되도록 보장
+        wb_out.calculation.fullCalcOnLoad = True
         buf = io.BytesIO()
         wb_out.save(buf)
         buf.seek(0)
