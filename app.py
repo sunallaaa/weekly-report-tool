@@ -22,6 +22,7 @@ from datetime import datetime
 import streamlit as st
 import openpyxl
 import pandas as pd
+import plotly.graph_objects as go
 
 import raw_to_report
 
@@ -174,6 +175,38 @@ METRIC_LABELS = {
     'COST': 'COST (원, -vat)', 'TRANS': 'TRANS (구매완료수)', 'SALES': 'SALES (매출액, 원)',
     'CPA': 'CPA (원)', 'CVR': 'CVR (%)', 'ROAS': 'ROAS (%)',
 }
+
+
+# 주요지표(절대량 계열) = 막대, 보조지표(효율/비율 계열) = 선그래프
+PRIMARY_METRICS = ['IMPS', 'CLICK', 'COST', 'TRANS', 'SALES']
+SECONDARY_METRICS = ['CTR', 'CPC', 'CPA', 'CVR', 'ROAS']
+
+
+def render_combo_chart(x_values, x_label, series_dict, primary_metrics, secondary_metrics, title=None):
+    """주요지표는 막대(왼쪽 축), 보조지표는 선그래프(오른쪽 축)로 겹쳐 그린다."""
+    fig = go.Figure()
+    for m in primary_metrics:
+        if m in series_dict:
+            fig.add_bar(name=METRIC_LABELS[m], x=x_values, y=series_dict[m])
+    for m in secondary_metrics:
+        if m in series_dict:
+            fig.add_trace(go.Scatter(
+                name=METRIC_LABELS[m], x=x_values, y=series_dict[m],
+                mode='lines+markers', yaxis='y2',
+            ))
+    layout = dict(
+        barmode='group',
+        xaxis=dict(title=x_label),
+        yaxis=dict(title='주요지표 (막대)'),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        margin=dict(t=70),
+    )
+    if secondary_metrics:
+        layout['yaxis2'] = dict(title='보조지표 (선그래프, %/원)', overlaying='y', side='right')
+    if title:
+        layout['title'] = title
+    fig.update_layout(**layout)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -345,46 +378,103 @@ elif mode.startswith("④"):
             sheet_pick = st.selectbox("시트 선택", list(series.keys()), key="dash_sheet")
             groups_data = series[sheet_pick]
 
+            # ── 주차별 추이 ──────────────────────────────────────
             st.subheader("📈 주차별 추이")
-            metric_trend = st.selectbox(
-                "지표 선택", list(METRIC_LABELS.keys()),
-                format_func=lambda k: METRIC_LABELS[k], key="trend_metric",
+            default_trend_group = 'TOTAL' if 'TOTAL' in groups_data else list(groups_data.keys())[0]
+            group_pick_trend = st.selectbox(
+                "채널/브랜드 선택", list(groups_data.keys()),
+                index=list(groups_data.keys()).index(default_trend_group), key="trend_group",
             )
-            default_group = ['TOTAL'] if 'TOTAL' in groups_data else list(groups_data.keys())[:1]
-            group_pick = st.multiselect(
-                "채널/브랜드 선택 (복수 선택 가능)", list(groups_data.keys()),
-                default=default_group, key="trend_groups",
-            )
-            if group_pick:
-                trend_df = None
-                for g in group_pick:
-                    df_g = pd.DataFrame(groups_data[g]).set_index('WEEK')[[metric_trend]].rename(columns={metric_trend: g})
-                    trend_df = df_g if trend_df is None else trend_df.join(df_g, how='outer')
-                st.line_chart(trend_df)
+            trend_source = groups_data[group_pick_trend]
+            all_weeks_trend = [p['WEEK'] for p in trend_source]
+
+            if len(all_weeks_trend) >= 2:
+                period = st.select_slider(
+                    "기간 선택", options=all_weeks_trend,
+                    value=(all_weeks_trend[0], all_weeks_trend[-1]), key="trend_period",
+                )
             else:
-                st.info("채널/브랜드를 1개 이상 선택해주세요.")
+                period = (all_weeks_trend[0], all_weeks_trend[0])
+            start_i, end_i = all_weeks_trend.index(period[0]), all_weeks_trend.index(period[1])
+            if start_i > end_i:
+                start_i, end_i = end_i, start_i
+            weeks_in_range = all_weeks_trend[start_i:end_i + 1]
+
+            metric_pick_trend = st.multiselect(
+                "지표 선택 (복수 선택 가능) — 주요지표는 막대, 보조지표는 선그래프로 표시됩니다",
+                list(METRIC_LABELS.keys()), default=['SALES', 'ROAS'],
+                format_func=lambda k: METRIC_LABELS[k], key="trend_metrics",
+            )
+
+            if weeks_in_range and metric_pick_trend:
+                pts_by_week = {p['WEEK']: p for p in trend_source}
+                series_dict = {m: [pts_by_week[w][m] for w in weeks_in_range] for m in metric_pick_trend}
+                primary_sel = [m for m in metric_pick_trend if m in PRIMARY_METRICS]
+                secondary_sel = [m for m in metric_pick_trend if m in SECONDARY_METRICS]
+                render_combo_chart(
+                    weeks_in_range, 'WEEK', series_dict, primary_sel, secondary_sel,
+                    title=f"{group_pick_trend} 주차별 추이",
+                )
+            else:
+                st.info("지표를 1개 이상 선택해주세요.")
 
             st.divider()
-            st.subheader("📊 채널/브랜드 비교 (특정 주차 기준)")
+
+            # ── 채널/브랜드 비교 ──────────────────────────────────
+            st.subheader("📊 채널/브랜드 비교")
             order_source = groups_data.get('TOTAL') or next(iter(groups_data.values()))
-            all_weeks = [p['WEEK'] for p in order_source]
-            week_pick = st.selectbox("비교할 주차 선택", all_weeks, index=len(all_weeks) - 1, key="compare_week")
-            metric_compare = st.selectbox(
-                "지표 선택", list(METRIC_LABELS.keys()),
-                format_func=lambda k: METRIC_LABELS[k], key="compare_metric",
+            all_weeks_cmp = [p['WEEK'] for p in order_source]
+            weeks_picked = st.multiselect(
+                "비교할 주차 선택 (복수 선택 가능)", all_weeks_cmp,
+                default=[all_weeks_cmp[-1]], key="compare_weeks",
             )
-            compare_rows = []
-            for g, pts in groups_data.items():
-                if g == 'TOTAL':
-                    continue
-                match = next((p for p in pts if p['WEEK'] == week_pick), None)
-                if match:
-                    compare_rows.append({'그룹': g, metric_compare: match[metric_compare]})
-            if compare_rows:
-                compare_df = pd.DataFrame(compare_rows).set_index('그룹')
-                st.bar_chart(compare_df)
+            compare_groups = [g for g in groups_data if g != 'TOTAL']
+
+            if not weeks_picked:
+                st.info("주차를 1개 이상 선택해주세요.")
+            elif len(weeks_picked) >= 2:
+                metric_cmp = st.selectbox(
+                    "지표 선택", list(METRIC_LABELS.keys()),
+                    format_func=lambda k: METRIC_LABELS[k], key="compare_metric_multi",
+                )
+                fig_cmp = go.Figure()
+                for w in weeks_picked:
+                    y_vals = []
+                    for g in compare_groups:
+                        match = next((p for p in groups_data[g] if p['WEEK'] == w), None)
+                        y_vals.append(match[metric_cmp] if match else None)
+                    fig_cmp.add_bar(name=w, x=compare_groups, y=y_vals)  # 막대 이름 = 주차 레이블
+                fig_cmp.update_layout(
+                    barmode='group',
+                    xaxis=dict(title='채널/브랜드'),
+                    yaxis=dict(title=METRIC_LABELS[metric_cmp]),
+                    legend=dict(title='주차', orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                    margin=dict(t=70),
+                )
+                st.plotly_chart(fig_cmp, use_container_width=True)
             else:
-                st.info("선택한 주차에는 채널/브랜드별 데이터가 없습니다.")
+                week_pick = weeks_picked[0]
+                metric_pick_cmp = st.multiselect(
+                    "지표 선택 (복수 선택 가능) — 주요지표는 막대, 보조지표는 선그래프로 표시됩니다",
+                    list(METRIC_LABELS.keys()), default=['SALES', 'ROAS'],
+                    format_func=lambda k: METRIC_LABELS[k], key="compare_metrics_single",
+                )
+                if metric_pick_cmp:
+                    series_dict_cmp = {}
+                    for m in metric_pick_cmp:
+                        vals = []
+                        for g in compare_groups:
+                            match = next((p for p in groups_data[g] if p['WEEK'] == week_pick), None)
+                            vals.append(match[m] if match else None)
+                        series_dict_cmp[m] = vals
+                    primary_sel_cmp = [m for m in metric_pick_cmp if m in PRIMARY_METRICS]
+                    secondary_sel_cmp = [m for m in metric_pick_cmp if m in SECONDARY_METRICS]
+                    render_combo_chart(
+                        compare_groups, '채널/브랜드', series_dict_cmp, primary_sel_cmp, secondary_sel_cmp,
+                        title=f"{week_pick} 채널/브랜드 비교",
+                    )
+                else:
+                    st.info("지표를 1개 이상 선택해주세요.")
     st.stop()
 
 else:
