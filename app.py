@@ -10,7 +10,7 @@
   5) 실제 셀에 반영한 엑셀 파일을 다운로드한다.
 
 추가로, 완성된 리포트 파일을 올리면 시트/채널/브랜드별 주차 추이 그래프와
-비교 그래프를 보여주는 성과 대시보드도 제공한다.
+비교 그래프, 상세 데이터 표를 보여주는 성과 대시보드도 제공한다.
 
 Anthropic API 키가 필요 없는 완전 무료 버전. 문장은 규칙 기반이라 다소 정형화되어 있음 —
 필요하면 화면에서 직접 다듬을 수 있다.
@@ -196,6 +196,8 @@ def render_combo_chart(x_values, x_label, series_dict, primary_metrics, secondar
             ))
     layout = dict(
         barmode='group',
+        bargap=0.35,        # 막대 그룹 사이 공백
+        bargroupgap=0.2,    # 같은 그룹 내 막대 사이 공백 (막대가 너무 두꺼워지지 않도록)
         xaxis=dict(title=x_label),
         yaxis=dict(title='주요지표 (막대)'),
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
@@ -207,6 +209,98 @@ def render_combo_chart(x_values, x_label, series_dict, primary_metrics, secondar
         layout['title'] = title
     fig.update_layout(**layout)
     st.plotly_chart(fig, use_container_width=True)
+
+
+def infer_year_month_labels(week_labels):
+    """주차 라벨(예: '7월 3주차 (7/15~7/21)')에는 연도가 없으므로, 라벨 순서(과거→최신)를 보고
+    연도를 추정해 'YYYY-MM' 문자열 리스트로 반환한다.
+    가장 최근 주는 오늘 날짜 기준 연도로 보고, 과거로 갈수록 월이 거꾸로 커지는 지점(연도 경계)에서
+    연도를 하나씩 낮춘다."""
+    months = [int(re.match(r'(\d+)월', w).group(1)) for w in week_labels]
+    years = [None] * len(months)
+    current_year = datetime.now().year
+    prev_month = None
+    for i in range(len(months) - 1, -1, -1):  # 최신 -> 과거 순으로 훑는다
+        mo = months[i]
+        if prev_month is not None and mo > prev_month:
+            current_year -= 1
+        years[i] = current_year
+        prev_month = mo
+    return [f"{y}-{m:02d}" for y, m in zip(years, months)]
+
+
+TABLE_METRIC_ORDER = ['IMPS', 'CLICK', 'COST', 'TRANS', 'SALES', 'CTR', 'CPC', 'CVR', 'ROAS']
+TABLE_METRIC_KR = {
+    'IMPS': '노출수', 'CLICK': '클릭수', 'COST': '광고비', 'TRANS': '전환수', 'SALES': '매출',
+    'CTR': 'CTR', 'CPC': 'CPC', 'CVR': 'CVR', 'ROAS': 'ROAS',
+}
+
+
+def format_value(metric, value):
+    if metric in ('CTR', 'CVR'):
+        return f"{value:.2f}%"
+    if metric == 'ROAS':
+        return f"{value:.0f}%"
+    return f"{value:,.0f}"
+
+
+def format_change(metric, curr, prev):
+    """CTR/CVR은 이미 %로 표현된 지표이므로 %p(포인트) 차이로, 그 외 지표는 상대 증감률(%)로 표시."""
+    if prev is None:
+        return None
+    if metric in ('CTR', 'CVR'):
+        diff = curr - prev
+        if abs(diff) < 0.05:
+            return '—', '변동없음', '#888888'
+        arrow = '▲' if diff > 0 else '▼'
+        color = '#d93025' if diff > 0 else '#1a73e8'
+        return arrow, f"{abs(diff):.1f}%p", color
+    if prev == 0:
+        return None
+    pct_chg = (curr - prev) / prev * 100
+    if abs(pct_chg) < 0.05:
+        return '—', '변동없음', '#888888'
+    arrow = '▲' if pct_chg > 0 else '▼'
+    color = '#d93025' if pct_chg > 0 else '#1a73e8'
+    return arrow, f"{abs(pct_chg):.1f}%", color
+
+
+def render_group_table_html(groups_data, week_label):
+    """선택한 주차 하나에 대해, 채널/브랜드별(+TOTAL) 지표 표를 HTML로 만든다.
+    각 셀에는 값과 함께 직전 주 대비 증감(▲빨강/▼파랑)을 작게 표시한다."""
+    table_groups = [g for g in groups_data if g != 'TOTAL']
+    if 'TOTAL' in groups_data:
+        table_groups.append('TOTAL')
+
+    html = ['<table style="width:100%; border-collapse:collapse; font-size:13px;">']
+    html.append('<thead><tr style="border-bottom:2px solid #333;">')
+    html.append('<th style="text-align:left; padding:6px 10px;">영역</th>')
+    for m in TABLE_METRIC_ORDER:
+        html.append(f'<th style="text-align:right; padding:6px 10px;">{TABLE_METRIC_KR[m]}</th>')
+    html.append('</tr></thead><tbody>')
+
+    for g in table_groups:
+        pts = groups_data[g]
+        idx = next((i for i, p in enumerate(pts) if p['WEEK'] == week_label), None)
+        if idx is None:
+            continue
+        curr = pts[idx]
+        prev = pts[idx - 1] if idx > 0 else None
+        is_total = (g == 'TOTAL')
+        row_style = 'border-top:2px solid #333; font-weight:bold;' if is_total else 'border-bottom:1px solid #eee;'
+        html.append(f'<tr style="{row_style}">')
+        html.append(f'<td style="text-align:left; padding:6px 10px;">{g}</td>')
+        for m in TABLE_METRIC_ORDER:
+            val_str = format_value(m, curr[m])
+            change = format_change(m, curr[m], prev[m] if prev else None)
+            cell = f'<div>{val_str}</div>'
+            if change:
+                arrow, text, color = change
+                cell += f'<div style="font-size:11px; color:{color};">{arrow} {text}</div>'
+            html.append(f'<td style="text-align:right; padding:6px 10px; vertical-align:top;">{cell}</td>')
+        html.append('</tr>')
+    html.append('</tbody></table>')
+    return ''.join(html)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -388,17 +482,19 @@ elif mode.startswith("④"):
             trend_source = groups_data[group_pick_trend]
             all_weeks_trend = [p['WEEK'] for p in trend_source]
 
-            if len(all_weeks_trend) >= 2:
-                period = st.select_slider(
-                    "기간 선택", options=all_weeks_trend,
-                    value=(all_weeks_trend[0], all_weeks_trend[-1]), key="trend_period",
-                )
-            else:
-                period = (all_weeks_trend[0], all_weeks_trend[0])
-            start_i, end_i = all_weeks_trend.index(period[0]), all_weeks_trend.index(period[1])
-            if start_i > end_i:
-                start_i, end_i = end_i, start_i
-            weeks_in_range = all_weeks_trend[start_i:end_i + 1]
+            ym_labels = infer_year_month_labels(all_weeks_trend)
+            week_to_ym = dict(zip(all_weeks_trend, ym_labels))
+            unique_yms = sorted(set(ym_labels))
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                start_ym = st.selectbox("시작월", unique_yms, index=0, key="trend_start_ym")
+            with col_b:
+                end_ym = st.selectbox("종료월", unique_yms, index=len(unique_yms) - 1, key="trend_end_ym")
+            if start_ym > end_ym:
+                start_ym, end_ym = end_ym, start_ym
+
+            weeks_in_range = [w for w in all_weeks_trend if start_ym <= week_to_ym[w] <= end_ym]
 
             metric_pick_trend = st.multiselect(
                 "지표 선택 (복수 선택 가능) — 주요지표는 막대, 보조지표는 선그래프로 표시됩니다",
@@ -415,6 +511,8 @@ elif mode.startswith("④"):
                     weeks_in_range, 'WEEK', series_dict, primary_sel, secondary_sel,
                     title=f"{group_pick_trend} 주차별 추이",
                 )
+            elif not weeks_in_range:
+                st.info("선택한 기간에 데이터가 없습니다.")
             else:
                 st.info("지표를 1개 이상 선택해주세요.")
 
@@ -446,6 +544,8 @@ elif mode.startswith("④"):
                     fig_cmp.add_bar(name=w, x=compare_groups, y=y_vals)  # 막대 이름 = 주차 레이블
                 fig_cmp.update_layout(
                     barmode='group',
+                    bargap=0.35,
+                    bargroupgap=0.2,
                     xaxis=dict(title='채널/브랜드'),
                     yaxis=dict(title=METRIC_LABELS[metric_cmp]),
                     legend=dict(title='주차', orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
@@ -475,6 +575,13 @@ elif mode.startswith("④"):
                     )
                 else:
                     st.info("지표를 1개 이상 선택해주세요.")
+
+            if weeks_picked:
+                st.markdown("#### 📋 선택 주차 상세 데이터")
+                st.caption("각 셀 아래의 작은 숫자는 직전 주 대비 증감입니다. (▲ 빨강 = 증가, ▼ 파랑 = 감소, CTR·CVR은 %p 기준)")
+                for w in weeks_picked:
+                    st.markdown(f"**{w}**")
+                    st.markdown(render_group_table_html(groups_data, w), unsafe_allow_html=True)
     st.stop()
 
 else:
