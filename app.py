@@ -233,7 +233,7 @@ def generate_comments_rule_based(brief):
 # 4) Streamlit 화면
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="주간 리포트 코멘트 자동화", layout="wide")
-st.title("📊 주간 광고 리포트 자동화 (무료 버전)")
+st.title("📊 Report Automation Program")
 st.caption("로우데이터 또는 완성된 리포트 파일을 올리면, 데이터 분석 → 특이사항 반영 → 코멘트 자동 작성까지 진행합니다. API 키가 필요 없습니다.")
 
 mode = st.radio(
