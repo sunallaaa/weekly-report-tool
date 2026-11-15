@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --sub:#6b7385; --line:#e3e6ec; --acc:#03c75a; --acc2:#2f6bff; --warn:#e8590c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  header { background:#111827; color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; font-weight:700; }
+  header .live { font-size:12px; color:#9ca3af; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--acc); margin-right:6px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  nav { display:flex; gap:4px; padding:0 20px; background:#111827; overflow-x:auto; }
+  nav button { background:none; border:0; color:#9ca3af; padding:10px 14px; font-size:14px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
+  nav button.on { color:#fff; border-color:var(--acc); }
+  main { padding:16px 20px 40px; max-width:1400px; margin:0 auto; }
+  .tab { display:none; } .tab.on { display:block; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  select, input, button.btn, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  button.btn { cursor:pointer; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); font-weight:600; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .card .k { color:var(--sub); font-size:12px; } .card .v { font-size:20px; font-weight:700; margin-top:4px; }
+  .card .t { font-size:11px; color:var(--acc2); margin-top:2px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .panel h3 { margin:0 0 10px; font-size:15px; }
+  .tbl { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { background:#f8f9fb; color:var(--sub); font-weight:600; position:sticky; top:0; }
+  td.l, th.l { text-align:left; }
+  .up { color:#d6336c; } .down { color:#1c7ed6; }
+  .notice { background:#fff4e6; border:1px solid #ffd8a8; color:#8a4b08; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  .err { background:#fff0f0; border:1px solid #ffc9c9; color:#c92a2a; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  .muted { color:var(--sub); font-size:12px; }
+  .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
+  canvas { max-height:340px; }
+  a { color:var(--acc2); }
+  @media (max-width:640px) { main { padding:12px; } .card .v { font-size:17px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>📡 한국마즈 네이버 광고 대시보드</h1>
+  <span class="live" id="liveInfo"></span>
+</header>
+<nav>
+  <button class="on" data-tab="live">실시간 성과</button>
+  <button data-tab="weekly">주간 리포트</button>
+  <button data-tab="trend">키워드 트렌드</button>
+  <button data-tab="admin">데이터 수집·설정</button>
+</nav>
+<main>
+  <div id="msg"></div>
+
+  <!-- 실시간 -->
+  <section class="tab on" id="tab-live">
+    <div class="bar">
+      <select id="preset">
+        <option value="today">오늘 (실시간)</option>
+        <option value="yesterday">어제</option>
+        <option value="7d" selected>최근 7일 + 오늘</option>
+        <option value="lastweek">지난주 (월~일)</option>
+        <option value="month">이번 달</option>
+        <option value="custom">직접 선택</option>
+      </select>
+      <span id="customRange" style="display:none"><input type="date" id="since"> ~ <input type="date" id="until"></span>
+      <select id="media"><option value="ALL">전체 매체</option><option value="SA">검색광고</option><option value="GFA">GFA</option></select>
+      <input id="filter" placeholder="캠페인명 필터 (예: PET)" size="18">
+      <label class="muted"><input type="checkbox" id="vat"> 검색광고 광고비 ÷1.1</label>
+      <button class="btn pri" id="btnLoad">조회</button>
+      <label class="muted"><input type="checkbox" id="auto"> 5분마다 자동 새로고침</label>
+    </div>
+    <div id="notice"></div>
+    <div class="cards" id="cards"></div>
+    <div class="panel"><h3>일별 추이</h3><canvas id="chartDaily"></canvas></div>
+    <div class="panel"><h3>캠페인별 성과</h3><div class="tbl" id="tblCamp"></div></div>
+    <div class="panel"><h3>광고그룹별 성과 <span class="muted">(광고비 상위 300)</span></h3><div class="tbl" id="tblGroup" style="max-height:480px;overflow:auto"></div></div>
+  </section>
+
+  <!-- 주간 리포트 -->
+  <section class="tab" id="tab-weekly">
+    <div class="bar">
+      <button class="btn pri" id="btnWeekly">주간 리포트 생성</button>
+      <span class="muted">로우데이터 시트 기준 · 완전한 주(월~일)만 집계 · GFA 광고비 ÷1.1 · BS_Pet 광고비 = 월예산×7/30</span>
+    </div>
+    <div id="weeklyLinks"></div>
+    <div id="weeklyBody"></div>
+  </section>
+
+  <!-- 트렌드 -->
+  <section class="tab" id="tab-trend">
+    <div class="panel">
+      <div class="muted" style="margin-bottom:8px">네이버 데이터랩 검색어 트렌드 · 기간 내 최대 검색량 = 100 기준 상대지표 · 한 줄에 "그룹명: 키워드1, 키워드2" (최대 5줄)</div>
+      <textarea id="groups" rows="5" style="width:100%">그리니즈: 그리니즈
+시저: 시저 강아지, 시저사료
+템테이션: 템테이션 고양이, 템테이션 간식
+쉬바: 쉬바 고양이, 쉬바 파우치
+위스카스: 위스카스</textarea>
+      <div class="bar" style="margin-top:8px">
+        <input type="date" id="tSince"> ~ <input type="date" id="tUntil">
+        <select id="tUnit"><option value="date">일</option><option value="week" selected>주</option><option value="month">월</option></select>
+        <select id="tDev"><option value="">전체 기기</option><option value="pc">PC</option><option value="mo">모바일</option></select>
+        <button class="btn pri" id="btnTrend">트렌드 조회</button>
+      </div>
+    </div>
+    <div class="panel"><canvas id="chartTrend"></canvas></div>
+  </section>
+
+  <!-- 설정 -->
+  <section class="tab" id="tab-admin">
+    <div class="panel"><h3>연결 상태</h3><div id="status">확인 중…</div></div>
+    <div class="panel">
+      <h3>과거 데이터 수집 (검색광고)</h3>
+      <div class="muted" style="margin-bottom:8px">처음 설치 후 한 번, 리포트에 필요한 기간을 채워주세요. 7일씩 나눠서 수집합니다. (이미 있는 날짜는 덮어씀)</div>
+      <div class="bar"><input type="date" id="bSince"> ~ <input type="date" id="bUntil"><button class="btn pri" id="btnBackfill">수집 시작</button><span id="bProg" class="muted"></span></div>
+    </div>
+    <div class="panel">
+      <h3>GFA 데이터 반영</h3>
+      <div class="muted" style="margin-bottom:8px">GFA 광고관리자에서 일별 리포트를 내려받아 구글시트의 <b>'GFA_업로드'</b> 탭에 붙여넣은 뒤(첫 행 = 컬럼명) 아래 버튼을 누르세요. 같은 날짜의 기존 GFA 데이터는 교체됩니다.</div>
+      <div class="bar"><button class="btn pri" id="btnGfa">GFA 반영</button><span id="gfaRes" class="muted"></span></div>
+    </div>
+  </section>
+</main>
+
+<script>
+var charts = {}, autoTimer = null, TODAY = null;
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function n0(v) { return Math.round(v || 0).toLocaleString('ko-KR'); }
+function n2(v) { return (v || 0).toFixed(2); }
+function addDays(s, n) { var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function showErr(e) { $('msg').innerHTML = '<div class="err">⚠️ ' + esc(e && e.message ? e.message : e) + '</div>'; }
+function clearMsg() { $('msg').innerHTML = ''; }
+function call(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (ok, ng) { google.script.run.withSuccessHandler(ok).withFailureHandler(ng)[fn].apply(null, args); });
+}
+
+// 탭
+document.querySelectorAll('nav button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('nav button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab); });
+  };
+});
+
+function rangeOf(p) {
+  var t = TODAY, wd = (new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7;
+  if (p === 'today') return [t, t];
+  if (p === 'yesterday') return [addDays(t, -1), addDays(t, -1)];
+  if (p === '7d') return [addDays(t, -7), t];
+  if (p === 'lastweek') { var mon = addDays(t, -wd - 7); return [mon, addDays(mon, 6)]; }
+  if (p === 'month') return [t.slice(0, 8) + '01', t];
+  return [$('since').value, $('until').value];
+}
+$('preset').onchange = function () { $('customRange').style.display = this.value === 'custom' ? '' : 'none'; };
+
+function card(k, v, t) { return '<div class="card"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (t ? '<div class="t">' + t + '</div>' : '') + '</div>'; }
+
+function table(rows, keyCols) {
+  var h = '<table><tr>' + keyCols.map(function (c) { return '<th class="l">' + c + '</th>'; }).join('') +
+    '<th>노출</th><th>클릭</th><th>CTR</th><th>광고비</th><th>CPC</th><th>전환</th><th>CPA</th><th>CVR</th><th>매출</th><th>ROAS</th></tr>';
+  rows.forEach(function (r) {
+    var ks = r.key.split('|');
+    h += '<tr>' + ks.map(function (k, i) { return '<td class="l">' + (i === 0 && keyCols[0] === '매체' ? '<span class="tag">' + esc(k) + '</span>' : esc(k)) + '</td>'; }).join('') +
+      '<td>' + n0(r.imps) + '</td><td>' + n0(r.clk) + '</td><td>' + n2(r.ctr) + '%</td><td>' + n0(r.cost) + '</td><td>' + n0(r.cpc) +
+      '</td><td>' + n0(r.conv) + '</td><td>' + n0(r.cpa) + '</td><td>' + n2(r.cvr) + '%</td><td>' + n0(r.rev) + '</td><td>' + n0(r.roas) + '%</td></tr>';
+  });
+  return rows.length ? h + '</table>' : '<div class="muted">데이터가 없습니다.</div>';
+}
+
+function drawChart(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart($(id), cfg); }
+
+function load(force) {
+  var r = rangeOf($('preset').value);
+  if (!r[0] || !r[1]) return showErr('기간을 선택해주세요.');
+  $('btnLoad').disabled = true; clearMsg();
+  $('btnLoad').textContent = '조회 중…';
+  call('apiDashboard', r[0], r[1], { media: $('media').value, filter: $('filter').value.trim(), force: !!force, vatExclude: $('vat').checked })
+    .then(render).catch(showErr)
+    .finally(function () { $('btnLoad').disabled = false; $('btnLoad').textContent = '조회'; });
+}
+
+function render(d) {
+  var T = d.total, td = d.today;
+  $('liveInfo').innerHTML = d.liveAt ? '<span class="dot"></span>오늘 데이터 ' + d.liveAt + ' 기준 · 네이버 집계 지연 있음' : d.since + ' ~ ' + d.until;
+  $('notice').innerHTML = d.notice ? '<div class="notice">' + esc(d.notice) + '</div>' : '';
+  function tt(v) { return td ? '오늘 ' + v : ''; }
+  $('cards').innerHTML =
+    card('노출', n0(T.imps), td && tt(n0(td.imps))) + card('클릭', n0(T.clk), td && tt(n0(td.clk))) +
+    card('CTR', n2(T.ctr) + '%', td && tt(n2(td.ctr) + '%')) + card('광고비', n0(T.cost) + '원', td && tt(n0(td.cost) + '원')) +
+    card('CPC', n0(T.cpc) + '원', td && tt(n0(td.cpc) + '원')) + card('전환', n0(T.conv), td && tt(n0(td.conv))) +
+    card('매출', n0(T.rev) + '원', td && tt(n0(td.rev) + '원')) + card('ROAS', n0(T.roas) + '%', td && tt(n0(td.roas) + '%'));
+  drawChart('chartDaily', {
+    data: {
+      labels: d.daily.map(function (x) { return x.key.slice(5); }),
+      datasets: [
+        { type: 'bar', label: '광고비', data: d.daily.map(function (x) { return x.cost; }), backgroundColor: '#2f6bff', yAxisID: 'y' },
+        { type: 'bar', label: '매출', data: d.daily.map(function (x) { return x.rev; }), backgroundColor: '#03c75a', yAxisID: 'y' },
+        { type: 'line', label: 'ROAS(%)', data: d.daily.map(function (x) { return x.roas; }), borderColor: '#e8590c', backgroundColor: '#e8590c', yAxisID: 'y2', tension: .3 }
+      ]
+    },
+    options: { responsive: true, interaction: { mode: 'index', intersect: false },
+      scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } }
+  });
+  $('tblCamp').innerHTML = table(d.byCampaign, ['매체', '캠페인']);
+  $('tblGroup').innerHTML = table(d.byGroup, ['매체', '캠페인', '광고그룹']);
+}
+
+$('btnLoad').onclick = function () { load(false); };
+$('auto').onchange = function () {
+  clearInterval(autoTimer);
+  if (this.checked) autoTimer = setInterval(function () { load(true); }, 5 * 60 * 1000);
+};
+
+// 주간 리포트
+$('btnWeekly').onclick = function () {
+  var b = this; b.disabled = true; clearMsg();
+  call('apiWeeklyReport').then(function (res) {
+    $('weeklyLinks').innerHTML = '<div class="panel">✅ 구글시트 <a href="' + res.sheetUrl + '" target="_blank">주간리포트 탭 열기</a> · <a href="' + res.xlsxUrl + '" target="_blank">엑셀(.xlsx) 다운로드</a> <span class="muted">(엑셀 파일은 기존 리포트 프로그램에도 로우데이터로 사용 가능)</span></div>';
+    var h = '';
+    Object.keys(res.report).forEach(function (sheet) {
+      h += '<div class="panel"><h3>' + esc(sheet) + '</h3><div class="tbl"><table><tr><th class="l">그룹</th><th class="l">WEEK</th><th>노출</th><th>클릭</th><th>CTR</th><th>광고비(-vat)</th><th>전환</th><th>매출</th><th>ROAS</th><th>매출 WoW</th><th>ROAS WoW</th></tr>';
+      Object.keys(res.report[sheet]).forEach(function (grp) {
+        var rows = res.report[sheet][grp], last = rows.slice(-4);
+        last.forEach(function (r, i) {
+          var prev = i > 0 ? last[i - 1].v : (rows.length > last.length ? rows[rows.length - last.length - 1].v : null), v = r.v;
+          function wow(a, b) { if (!prev || !b) return ''; var p = (a - b) / b * 100; if (Math.abs(p) < 0.05) return '<span class="muted">0.0%</span>'; return '<span class="' + (p > 0 ? 'up' : 'down') + '">' + (p > 0 ? '▲' : '▼') + Math.abs(p).toFixed(1) + '%</span>'; }
+          h += '<tr><td class="l">' + (i === 0 ? '<b>' + esc(grp) + '</b>' : '') + '</td><td class="l">' + esc(r.week) + '</td><td>' + n0(v[0]) + '</td><td>' + n0(v[1]) +
+            '</td><td>' + (v[2] * 100).toFixed(2) + '%</td><td>' + n0(v[4]) + '</td><td>' + n0(v[5]) + '</td><td>' + n0(v[6]) + '</td><td>' + n0(v[9] * 100) +
+            '%</td><td>' + (prev ? wow(v[6], prev[6]) : '') + '</td><td>' + (prev ? wow(v[9], prev[9]) : '') + '</td></tr>';
+        });
+      });
+      h += '</table></div><div class="muted" style="margin-top:6px">최근 4주 표시 · 전체 주차는 구글시트 주간리포트 탭 참고</div></div>';
+    });
+    $('weeklyBody').innerHTML = h || '<div class="notice">집계할 데이터가 없습니다. 검색광고 과거 데이터 수집 / GFA 반영을 먼저 진행해주세요.</div>';
+  }).catch(showErr).finally(function () { b.disabled = false; });
+};
+
+// 트렌드
+$('btnTrend').onclick = function () {
+  var groups = $('groups').value.split('\n').map(function (l) {
+    var i = l.indexOf(':'); if (i < 0) return null;
+    var kws = l.slice(i + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    return kws.length ? { name: l.slice(0, i).trim(), keywords: kws } : null;
+  }).filter(Boolean);
+  var b = this; b.disabled = true; clearMsg();
+  call('apiTrend', $('tSince').value, $('tUntil').value, $('tUnit').value, groups, $('tDev').value).then(function (res) {
+    var colors = ['#03c75a', '#2f6bff', '#e8590c', '#ae3ec9', '#f59f00'];
+    drawChart('chartTrend', { type: 'line', data: {
+      labels: (res[0] ? res[0].data : []).map(function (p) { return p.period; }),
+      datasets: res.map(function (r, i) { return { label: r.title, data: r.data.map(function (p) { return p.ratio; }), borderColor: colors[i], backgroundColor: colors[i], tension: .3 }; })
+    }, options: { interaction: { mode: 'index', intersect: false }, scales: { y: { title: { display: true, text: '상대 검색량 (최대=100)' } } } } });
+  }).catch(function (e) { showErr((e.message || e) + ' — 개발자센터 애플리케이션의 사용 API에 "데이터랩(검색어트렌드)"가 추가되어 있는지 확인해주세요.'); })
+    .finally(function () { b.disabled = false; });
+};
+
+// 수집·설정
+function loadStatus() {
+  call('apiStatus').then(function (s) {
+    TODAY = s.today;
+    $('status').innerHTML =
+      (s.sa ? '🟢' : '🔴') + ' 검색광고 API<br>' + (s.datalab ? '🟢' : '🔴') + ' 데이터랩 API<br>' +
+      (s.trigger ? '🟢 매일 07시 자동 수집 켜짐' : '🔴 자동 수집 트리거 없음 (편집기에서 setup 실행)') + '<br>' +
+      '📄 로우데이터 ' + n0(s.rawRows) + '행 · 마지막 날짜 ' + (s.lastDate || '-') + ' · <a href="' + s.spreadsheetUrl + '" target="_blank">구글시트 열기</a>';
+    $('tSince').value = addDays(TODAY, -180); $('tUntil').value = addDays(TODAY, -1);
+    $('bSince').value = addDays(TODAY, -35); $('bUntil').value = addDays(TODAY, -1);
+    $('since').value = addDays(TODAY, -14); $('until').value = TODAY;
+    if (s.sa) load(false);
+    else showErr('스크립트 속성에 검색광고 API 키가 없습니다. 설치 가이드의 "키 등록"을 진행해주세요.');
+  }).catch(showErr);
+}
+
+$('btnBackfill').onclick = function () {
+  var s = $('bSince').value, u = $('bUntil').value, b = this;
+  if (!s || !u || s > u) return showErr('기간을 확인해주세요.');
+  var chunks = [];
+  for (var d = s; d <= u; d = addDays(d, 7)) chunks.push([d, addDays(d, 6) < u ? addDays(d, 6) : u]);
+  b.disabled = true; clearMsg();
+  var total = 0, i = 0;
+  (function next() {
+    if (i >= chunks.length) { $('bProg').textContent = '✅ 완료 (' + n0(total) + '행)'; b.disabled = false; loadStatus(); return; }
+    $('bProg').textContent = (i + 1) + '/' + chunks.length + ' 수집 중 (' + chunks[i][0] + '~' + chunks[i][1] + ')';
+    call('apiBackfill', chunks[i][0], chunks[i][1]).then(function (n) { total += n; i++; next(); })
+      .catch(function (e) { showErr(e); b.disabled = false; });
+  })();
+};
+
+$('btnGfa').onclick = function () {
+  var b = this; b.disabled = true; clearMsg();
+  call('apiImportGfa').then(function (r) {
+    $('gfaRes').innerHTML = '✅ ' + n0(r.rows) + '행 반영 (' + r.since + ' ~ ' + r.until + ')' +
+      (r.unknown.length ? '<br>⚠️ 주간리포트에 분류되지 않는 캠페인 (이름이 "(Mars Conf)"/"(Mars Pet)"로 시작해야 함): ' + esc(r.unknown.join(', ')) : '');
+  }).catch(showErr).finally(function () { b.disabled = false; });
+};
+
+loadStatus();
+</script>
+</body>
+</html>
