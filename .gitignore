@@ -1,0 +1,8 @@
+# 🔒 API 키 파일 — 절대 커밋 금지
+.streamlit/secrets.toml
+.env
+*.env
+
+__pycache__/
+*.pyc
+.pytest_cache/
