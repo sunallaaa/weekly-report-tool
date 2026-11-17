@@ -144,3 +144,20 @@ console.log(pass + ' passed (total)');
   });
 }
 console.log(pass + ' passed (all)');
+
+// ───── GFA 게이트웨이 시험 함수 ─────
+{
+  const mk = (code, body) => makeEnv({ props: Object.assign({}, PROPS, { GFA_API_KEY: 'gk', GFA_TEAM_NAME: '광고사업1-1' }), fetch: (url, o) => {
+    const u = new URL(url);
+    assert.strictEqual(u.host, 'ai.adef.co.kr'); assert.strictEqual(u.pathname, '/sunghyun_yoon/api/v1/public/gfa-proxy/adAccounts');
+    assert.strictEqual(u.searchParams.get('team_name'), '광고사업1-1'); assert.strictEqual(o.headers['X-API-Key'], 'gk');
+    return { getResponseCode: () => code, getContentText: () => body };
+  } });
+  const ok = mk(200, '[{"adAccountNo":1}]'); ok.testGfaConnection();
+  t('GFA 시험: 주소·팀명·헤더 형식 + 성공 로그', () => assert.ok(/연결 성공/.test(ok._logs[0])));
+  const ng = mk(403, '{"detail":"ip not allowed"}'); ng.testGfaConnection();
+  t('GFA 시험: 403 안내 문구', () => assert.ok(/IP 제한/.test(ng._logs[0]) && /ip not allowed/.test(ng._logs[1])));
+  const none = makeEnv({ props: PROPS, fetch: () => { throw new Error('no call'); } });
+  t('GFA 시험: 팀 이름 없으면 안내', () => assert.throws(() => none.testGfaConnection(), /GFA_TEAM_NAME/));
+}
+console.log(pass + ' passed (final)');

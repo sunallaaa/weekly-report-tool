@@ -369,6 +369,39 @@ function fillContractDays_(rows, contracts, since, lastDay) {
   return rows.concat(add);
 }
 
+// ───────────────────────── GFA (사내 게이트웨이) ─────────────────────────
+// 사내 안내서 기준: Base URL + {네이버 GFA API 경로}?team_name={팀명}, 헤더 X-API-Key
+var GFA_GATEWAY_BASE = 'https://ai.adef.co.kr/sunghyun_yoon/api/v1/public/gfa-proxy/';
+var GFA_STATUS_TEXT = {
+  400: 'account_id 누락', 401: 'API 키 누락 또는 불일치 (GFA_API_KEY 확인)',
+  403: '등록되지 않은 팀 / 허용되지 않은 IP / 권한 없는 계정 (팀 이름 확인 → 맞다면 IP 제한 가능성 큼)',
+  502: '네이버 GFA API 통신 오류', 504: '네이버 GFA API 응답 시간 초과'
+};
+
+function gfaGet_(path, params) {
+  var p = props_(), key = p.getProperty('GFA_API_KEY'), team = p.getProperty('GFA_TEAM_NAME');
+  if (!key || !team) throw new Error('스크립트 속성에 GFA_API_KEY / GFA_TEAM_NAME 이 필요합니다.');
+  var base = p.getProperty('GFA_API_BASE_URL') || GFA_GATEWAY_BASE;
+  var qs = ['team_name=' + encodeURIComponent(team)];
+  Object.keys(params || {}).forEach(function (k) { qs.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k])); });
+  var res = UrlFetchApp.fetch(base.replace(/\/$/, '') + '/' + String(path).replace(/^\//, '') + '?' + qs.join('&'), {
+    method: 'get', muteHttpExceptions: true, headers: { 'X-API-Key': key }
+  });
+  return { code: res.getResponseCode(), text: res.getContentText() };
+}
+
+/** GFA 연결 시험 (편집기에서 실행 → 실행 로그 확인) */
+function testGfaConnection() {
+  var r = gfaGet_('adAccounts');
+  if (r.code === 200) {
+    Logger.log('✅ GFA 게이트웨이 연결 성공 (HTTP 200)');
+    Logger.log('응답 앞부분: ' + r.text.slice(0, 1500));
+  } else {
+    Logger.log('❌ GFA 연결 실패 HTTP ' + r.code + ' — ' + (GFA_STATUS_TEXT[r.code] || '알 수 없는 오류'));
+    Logger.log('서버 메시지: ' + r.text.slice(0, 500));
+  }
+}
+
 // ───────────────────────── 집계 ─────────────────────────
 function emptyAgg_() { return { imps: 0, clk: 0, cost: 0, conv: 0, rev: 0 }; }
 function addAgg_(a, r) { a.imps += +r[5] || 0; a.clk += +r[6] || 0; a.cost += +r[7] || 0; a.conv += +r[8] || 0; a.rev += +r[9] || 0; return a; }
