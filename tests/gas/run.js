@@ -65,3 +65,58 @@ t('키 미설정 시 안내 에러', () => { const g4 = makeEnv({ fetch: fakeNav
 out.signature = g.saSignature_('1700000000000', 'GET', '/ncc/campaigns', 'dummy-secret==');
 require('fs').writeFileSync(process.argv[2], JSON.stringify(out));
 console.log(pass + ' passed');
+
+// ───── 브랜드검색 계약 광고비 ─────
+{
+  const g5 = makeEnv({ fetch: fakeNaver(), props: PROPS });
+  const fixed = new Date('2026-11-16T03:00:00Z').getTime(); const RD = Date;
+  g5.Date = class extends RD { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } };
+  g5.apiBackfill('2026-11-02', '2026-11-15');
+  g5.setup();
+  const sh = g5._sheets['BS계약'];
+  t('계약 시트 자동 생성 (기본 브랜드 + 뉴트로)', () => {
+    assert.ok(sh); assert.deepStrictEqual(sh.data.slice(1).map(r => r[0]), ['그리니즈', '시저', '템테이션', '쉬바', '위스카스', '뉴트로']);
+  });
+  // 시저: 90일 9,000,000 → 하루 100,000 / 그리니즈: 11/5부터 30일 3,000,000 → 하루 100,000 (주 중간 시작)
+  sh.data[2] = ['시저', '2026-11-01', '2027-01-29', '9,000,000', ''];
+  sh.data[1] = ['그리니즈', '2026-11-05', '2026-12-04', 3000000, ''];
+  t('계약 로딩: 90일 계약 하루 광고비 = 100,000', () => {
+    const c = g5.loadContracts_(); const s = c.find(x => x.brand === '시저');
+    assert.strictEqual(s.days, 90); assert.strictEqual(s.daily, 100000); assert.strictEqual(c.length, 2);
+  });
+  const d = g5.apiDashboard('2026-11-09', '2026-11-15', { media: 'ALL' });
+  t('대시보드: 브랜드별 광고비·ROAS 계산', () => {
+    const grp = Object.fromEntries(d.byGroup.map(x => [x.key.split('|')[2], x]));
+    assert.strictEqual(grp['시저_MO'].cost, 700000); assert.strictEqual(grp['그리니즈_PC'].cost, 700000);
+    assert.ok(Math.abs(grp['시저_MO'].roas - 7 * 30000 / 700000 * 100) < 1e-9);
+    assert.ok(!/계약금액 미입력/.test(d.notice));
+  });
+  const rep = g5.apiWeeklyReport().report['NAVER BS_Pet'];
+  t('주간: 시저 주 광고비 700,000 / 그리니즈는 계약 시작 주에 4일분 400,000', () => {
+    assert.strictEqual(rep['시저'][0].v[4], 700000);
+    assert.strictEqual(rep['그리니즈'][0].week, '11월 1주차 (11/2~11/8)');
+    assert.strictEqual(rep['그리니즈'][0].v[4], 400000); assert.strictEqual(rep['그리니즈'][1].v[4], 700000);
+    assert.strictEqual(rep['TOTAL'][0].v[4], 1100000);
+  });
+  t('계약 없는 날·브랜드는 기존 규칙/안내', () => {
+    sh.data[1] = ['그리니즈', '', '', '', ''];
+    const d2 = g5.apiDashboard('2026-11-09', '2026-11-15', { media: 'ALL' });
+    assert.ok(/계약금액 미입력: 그리니즈/.test(d2.notice));
+    assert.strictEqual(g5.apiWeeklyReport().report['NAVER BS_Pet']['그리니즈'][0].v[4], 800000 * 7 / 30);
+  });
+  t('추가 브랜드(뉴트로) 분류 + 긴 이름 우선', () => {
+    const c = [{ brand: '뉴트로', start: '2026-11-02', end: '2026-11-08', amount: 70000, days: 7, daily: 10000 }];
+    const raw = [];
+    for (let i = 0; i < 7; i++) raw.push([g5.addDays_('2026-11-02', i), 'NaverBS', 'ALL', '1. M_마즈코리아_PET_브랜드검색', '6. 뉴트로', 100, 10, 0, 1, 5000]);
+    const a = g5.weeklyAggregate_(raw, c);
+    assert.strictEqual(a['NAVER BS_Pet']['뉴트로'][Object.keys(a['NAVER BS_Pet']['뉴트로'])[0]].v[2], 70000);
+    assert.strictEqual(g5.brandOf_('7. 시저캣', [{ brand: '시저캣' }]), '시저캣');
+  });
+  t('VAT 체크는 검색광고 실비용에만 (계약금액은 그대로)', () => {
+    sh.data[1] = ['그리니즈', '2026-11-05', '2026-12-04', 3000000, ''];
+    const v = g5.apiDashboard('2026-11-09', '2026-11-15', { media: 'ALL', vatExclude: true });
+    const grp = Object.fromEntries(v.byGroup.map(x => [x.key.split('|')[2], x]));
+    assert.strictEqual(grp['시저_MO'].cost, 700000); assert.ok(Math.abs(grp['일반'].cost - 7 * 5000 / 1.1) < 1e-6);
+  });
+}
+console.log(pass + ' passed (total)');

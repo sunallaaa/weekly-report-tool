@@ -37,6 +37,10 @@ var SHEET_GROUP_ORDER = {
   'NAVER BS_Pet': ['TOTAL'].concat(BS_PET_BRANDS)
 };
 
+// 브랜드검색 계약 시트: 브랜드별 계약기간·계약금액 → 하루 광고비 = 계약금액 ÷ 계약일수
+var SHEET_BS_CONTRACT = 'BS계약';
+var BS_CONTRACT_HEADER = ['브랜드(광고그룹명에 포함된 단어)', '시작일', '종료일', '계약금액(VAT 제외, 원)', '메모'];
+
 var GFA_COLUMN_CANDIDATES = {
   'Date': ['기간', '일', '날짜', '일자', 'Date', 'date'],
   '캠페인': ['캠페인 이름', '캠페인명', '캠페인', 'Campaign', 'campaign'],
@@ -265,6 +269,7 @@ function dailyCollect() {
 /** 최초 1회 실행: 시트 생성 + 매일 07시 수집 트리거 설치 */
 function setup() {
   [[SHEET_RAW, RAW_COLS], [SHEET_GFA, null], [SHEET_LOG, ['시각', '내용']]].forEach(function (x) { sheet_(x[0], x[1]); });
+  ensureContractSheet_();
   ScriptApp.getProjectTriggers().forEach(function (tr) {
     if (tr.getHandlerFunction() === 'dailyCollect') ScriptApp.deleteTrigger(tr);
   });
@@ -278,6 +283,61 @@ function testConnection() {
   Logger.log('캠페인 ' + camps.length + '개: ' + camps.slice(0, 10).map(function (c) { return c.name + '(' + c.campaignTp + ')'; }).join(', '));
   var y = addDays_(todayYmd_(), -1), rows = saDayRows_(y);
   Logger.log(y + ' 광고그룹 행 ' + rows.length + '개, 광고비 합계 ' + rows.reduce(function (a, r) { return a + r[7]; }, 0));
+}
+
+// ───────────────────────── 브랜드검색 계약 광고비 ─────────────────────────
+function ensureContractSheet_() {
+  var ss = ss_(), sh = ss.getSheetByName(SHEET_BS_CONTRACT);
+  if (sh) return sh;
+  sh = sheet_(SHEET_BS_CONTRACT, BS_CONTRACT_HEADER);
+  var brands = BS_PET_BRANDS.concat(['뉴트로']);
+  sh.getRange(2, 1, brands.length, 5).setValues(brands.map(function (b) { return [b, '', '', '', '시작일·종료일·금액 입력']; }));
+  return sh;
+}
+
+/** [{brand, start, end, amount, days, daily}] — 금액/날짜가 채워진 행만 */
+function loadContracts_() {
+  var sh = ss_().getSheetByName(SHEET_BS_CONTRACT);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().map(function (r) {
+    var brand = String(r[0]).trim(), amount = num_(r[3]);
+    if (!brand || !r[1] || !r[2] || !amount) return null;
+    var start = toYmd_(r[1]), end = toYmd_(r[2]);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return null;
+    var days = dayList_(start, end).length;
+    return { brand: brand, start: start, end: end, amount: amount, days: days, daily: amount / days };
+  }).filter(Boolean);
+}
+
+/** 광고그룹명에 포함된 브랜드 (계약 시트 브랜드 + 기본 브랜드, 긴 이름 우선) */
+function brandOf_(group, contracts) {
+  var names = BS_PET_BRANDS.slice();
+  (contracts || []).forEach(function (c) { if (names.indexOf(c.brand) < 0) names.push(c.brand); });
+  names.sort(function (a, b) { return b.length - a.length; });
+  group = String(group || '');
+  for (var i = 0; i < names.length; i++) if (group.indexOf(names[i]) >= 0) return names[i];
+  return null;
+}
+
+/** 해당 브랜드·날짜의 계약 기준 하루 광고비 (계약 없으면 null) */
+function contractDaily_(brand, day, contracts) {
+  var sum = null;
+  contracts.forEach(function (c) {
+    if (c.brand === brand && day >= c.start && day <= c.end) sum = (sum || 0) + c.daily;
+  });
+  return sum;
+}
+
+/** 브랜드검색(NaverBS) 행의 광고비를 계약 기준 하루 광고비로 바꿈. 반환: {rows, missing:[계약 없는 브랜드]} */
+function applyContractCost_(rows, contracts) {
+  var missing = {};
+  var out = rows.map(function (r) {
+    if (r[1] !== 'NaverBS') return r;
+    var brand = brandOf_(r[4], contracts), daily = brand ? contractDaily_(brand, r[0], contracts) : null;
+    if (daily === null) { missing[brand || String(r[4])] = 1; return r; }
+    r = r.slice(); r[7] = daily; return r;
+  });
+  return { rows: out, missing: Object.keys(missing) };
 }
 
 // ───────────────────────── 집계 ─────────────────────────
@@ -330,6 +390,17 @@ function apiDashboard(since, until, opt) {
     notice = '수집되지 않은 날짜가 ' + missing.length + '일 있습니다. [과거 데이터 수집] 버튼으로 먼저 채워주세요.';
   }
   if (until >= t) { live = liveTodayRows_(opt.force); rows = rows.concat(live.rows); }
+  if (opt.vatExclude) rows = rows.map(function (r) {
+    if (SA_MEDIA.indexOf(r[1]) < 0) return r;
+    r = r.slice(); r[7] = r[7] / 1.1; return r;
+  });
+  ensureContractSheet_();
+  var applied = applyContractCost_(rows, loadContracts_());
+  rows = applied.rows;
+  if (applied.missing.length) {
+    notice = (notice ? notice + ' ' : '') + '브랜드검색 계약금액 미입력: ' + applied.missing.join(', ') +
+      " → 구글시트 'BS계약' 탭에 계약기간·금액을 입력하면 광고비·ROAS가 계산됩니다.";
+  }
 
   if (opt.media === 'SA') rows = rows.filter(function (r) { return SA_MEDIA.indexOf(r[1]) >= 0; });
   if (opt.media === 'GFA') rows = rows.filter(function (r) { return r[1] === 'GFA'; });
@@ -337,10 +408,9 @@ function apiDashboard(since, until, opt) {
     var f = String(opt.filter).toLowerCase();
     rows = rows.filter(function (r) { return String(r[3]).toLowerCase().indexOf(f) >= 0; });
   }
-  if (opt.vatExclude) rows = rows.map(function (r) { r = r.slice(); r[7] = r[7] / 1.1; return r; });
 
   var total = kpi_(rows.reduce(function (a, r) { return addAgg_(a, r); }, emptyAgg_()));
-  var today = live ? kpi_(live.rows.reduce(function (a, r) { return addAgg_(a, r); }, emptyAgg_())) : null;
+  var today = live ? kpi_(rows.filter(function (r) { return r[0] === t; }).reduce(function (a, r) { return addAgg_(a, r); }, emptyAgg_())) : null;
   return {
     since: since, until: until, total: total, today: today, liveAt: live ? live.at : null, notice: notice,
     daily: groupBy_(rows, function (r) { return r[0]; }).sort(function (a, b) { return a.key < b.key ? -1 : 1; }),
@@ -417,21 +487,23 @@ function classifyGfa_(camp) {
   ['ADVoost', 'NDA', '스마트채널', '쇼핑프로모션'].some(function (k) { if (name.indexOf(k) >= 0) { ch = k; return true; } return false; });
   return [sheet, ch];
 }
-function classifyBs_(camp, group) {
+function classifyBs_(camp, group, contracts) {
   if (camp.indexOf('PET') >= 0 && camp.indexOf('브랜드검색') >= 0) {
-    for (var i = 0; i < BS_PET_BRANDS.length; i++) if (group && group.indexOf(BS_PET_BRANDS[i]) >= 0) return ['NAVER BS_Pet', BS_PET_BRANDS[i]];
+    var b = brandOf_(group, contracts);
+    if (b) return ['NAVER BS_Pet', b];
   }
   return null;
 }
 
 /** 시트·그룹·주차별 [노출, 클릭, 광고비, 전환, 매출] — 완전한 주만 포함 */
-function weeklyAggregate_(raw) {
+function weeklyAggregate_(raw, contracts) {
+  contracts = contracts || [];
   if (!raw.length) return {};
   var minD = raw[0][0], maxD = raw[0][0];
   raw.forEach(function (r) { if (r[0] < minD) minD = r[0]; if (r[0] > maxD) maxD = r[0]; });
   var agg = {};   // sheet -> group -> monday -> {label, v:[5]}
   raw.forEach(function (r) {
-    var c = r[1] === 'GFA' ? classifyGfa_(String(r[3])) : r[1] === 'NaverBS' ? classifyBs_(String(r[3]), String(r[4])) : null;
+    var c = r[1] === 'GFA' ? classifyGfa_(String(r[3])) : r[1] === 'NaverBS' ? classifyBs_(String(r[3]), String(r[4]), contracts) : null;
     if (!c) return;
     var w = weekLabel_(r[0]);
     if (w.monday < minD || addDays_(w.monday, 6) > maxD) return;   // 앞뒤로 잘린 주 제외
@@ -441,10 +513,17 @@ function weeklyAggregate_(raw) {
     b.v[2] += r[1] === 'GFA' ? (+r[7] || 0) / GFA_VAT_DIVISOR : (+r[7] || 0);
     b.v[3] += +r[8] || 0; b.v[4] += +r[9] || 0;
   });
-  // BS_Pet: 광고비 = 월예산 × 7/30
+  // BS_Pet 광고비: 계약 시트가 있으면 그 주 7일의 하루 광고비 합계, 없으면 기존 규칙(월예산 × 7/30)
   var bs = agg['NAVER BS_Pet'] || {};
   Object.keys(bs).forEach(function (brand) {
-    Object.keys(bs[brand]).forEach(function (mon) { bs[brand][mon].v[2] = BS_PET_MONTHLY_BUDGET[brand] * 7 / 30; });
+    Object.keys(bs[brand]).forEach(function (mon) {
+      var sum = null;
+      for (var i = 0; i < 7; i++) {
+        var d = contractDaily_(brand, addDays_(mon, i), contracts);
+        if (d !== null) sum = (sum || 0) + d;
+      }
+      bs[brand][mon].v[2] = sum !== null ? sum : (BS_PET_MONTHLY_BUDGET[brand] || 0) * 7 / 30;
+    });
   });
   // TOTAL
   Object.keys(agg).forEach(function (sheet) {
@@ -466,16 +545,22 @@ function computeRow_(v) {
 }
 
 function apiWeeklyReport() {
-  var agg = weeklyAggregate_(readRaw_());
+  ensureContractSheet_();
+  var contracts = loadContracts_();
+  var agg = weeklyAggregate_(readRaw_(), contracts);
+  var order = JSON.parse(JSON.stringify(SHEET_GROUP_ORDER));
+  Object.keys(agg['NAVER BS_Pet'] || {}).forEach(function (b) {
+    if (order['NAVER BS_Pet'].indexOf(b) < 0) order['NAVER BS_Pet'].push(b);   // 뉴트로 등 추가 브랜드
+  });
   var sh = sheet_(SHEET_WEEKLY, null);
   sh.clear();
   var out = [], fmt = [], result = {};
   var HEAD = ['WEEK', 'IMPS', 'CLICK', 'CTR', 'CPC', 'COST (-vat)', 'TRANS', 'SALES', 'CPA', 'CVR', 'ROAS'];
-  Object.keys(SHEET_GROUP_ORDER).forEach(function (sheet) {
+  Object.keys(order).forEach(function (sheet) {
     if (!agg[sheet]) return;
     result[sheet] = {};
     out.push([sheet, '', '', '', '', '', '', '', '', '', '']); fmt.push('title');
-    SHEET_GROUP_ORDER[sheet].forEach(function (grp) {
+    order[sheet].forEach(function (grp) {
       var g = agg[sheet][grp];
       if (!g) return;
       out.push(['<' + grp + '>', '', '', '', '', '', '', '', '', '', '']); fmt.push('group');
