@@ -120,3 +120,27 @@ console.log(pass + ' passed');
   });
 }
 console.log(pass + ' passed (total)');
+
+// ───── 노출 없는 날도 계약 광고비 반영 ─────
+{
+  const g6 = makeEnv({ fetch: fakeNaver(), props: PROPS });
+  const fixed = new Date('2026-11-16T03:00:00Z').getTime(); const RD = Date;
+  g6.Date = class extends RD { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } };
+  g6.apiBackfill('2026-11-09', '2026-11-15');
+  g6.setup();
+  const sh = g6._sheets['BS계약'];
+  sh.data[1] = ['그리니즈', '2026-10-02', '2026-12-30', 2400000, ''];
+  sh.data[6] = ['뉴트로', '2026-09-30', '2026-12-28', 2400000, ''];   // 뉴트로는 데이터 행이 전혀 없음
+  // 그리니즈 11/12 행 삭제 → 노출 없는 날 흉내
+  const raw = g6._sheets['Msrs Daily']; raw.data = raw.data.filter(r => !(r[0] === '2026-11-12' && String(r[4]).includes('그리니즈')));
+  const d = g6.apiDashboard('2026-11-09', '2026-11-16', { media: 'ALL' });
+  const grp = Object.fromEntries(d.byGroup.map(x => [x.key.split('|')[2], x]));
+  t('노출 없는 날도 계약 광고비 포함 (그리니즈 8일 × 26,667)', () => assert.ok(Math.abs(grp['그리니즈_PC'].cost - 8 * 2400000 / 90) < 1e-6));
+  t('데이터 행 없는 계약 브랜드(뉴트로)도 광고비 표시', () => assert.ok(Math.abs(grp['뉴트로'].cost - 8 * 2400000 / 90) < 1e-6));
+  t('GFA만 보기에선 계약 광고비 제외', () => assert.strictEqual(g6.apiDashboard('2026-11-09', '2026-11-16', { media: 'GFA' }).total.cost, 0));
+  t('계약 시작 전 기간엔 안 붙음', () => {
+    const e = g6.apiDashboard('2026-09-01', '2026-09-29', { media: 'ALL' });
+    assert.strictEqual(e.byGroup.filter(x => x.key.includes('뉴트로')).length, 0);
+  });
+}
+console.log(pass + ' passed (all)');

@@ -340,6 +340,35 @@ function applyContractCost_(rows, contracts) {
   return { rows: out, missing: Object.keys(missing) };
 }
 
+/**
+ * 계약 기간 중인데 노출이 없어 데이터 행이 없는 날도 광고비는 나가므로, 광고비만 있는 행을 채워 넣는다.
+ * (예: 오늘 아직 노출 전인 브랜드) — since~lastDay 범위 안에서만
+ */
+function fillContractDays_(rows, contracts, since, lastDay) {
+  var have = {}, tmpl = {}, anyCamp = null;
+  rows.forEach(function (r) {
+    if (r[1] !== 'NaverBS') return;
+    var b = brandOf_(r[4], contracts);
+    anyCamp = anyCamp || r[3];
+    if (!b) return;
+    have[b + '|' + r[0]] = 1;
+    tmpl[b] = tmpl[b] || r;
+  });
+  var add = [];
+  contracts.forEach(function (c) {
+    var s = c.start > since ? c.start : since, e = c.end < lastDay ? c.end : lastDay;
+    if (s > e) return;
+    dayList_(s, e).forEach(function (d) {
+      if (have[c.brand + '|' + d]) return;
+      have[c.brand + '|' + d] = 1;
+      var t = tmpl[c.brand];
+      add.push([d, 'NaverBS', 'ALL', t ? t[3] : (anyCamp || '브랜드검색 (계약)'), t ? t[4] : c.brand,
+        0, 0, contractDaily_(c.brand, d, contracts), 0, 0]);
+    });
+  });
+  return rows.concat(add);
+}
+
 // ───────────────────────── 집계 ─────────────────────────
 function emptyAgg_() { return { imps: 0, clk: 0, cost: 0, conv: 0, rev: 0 }; }
 function addAgg_(a, r) { a.imps += +r[5] || 0; a.clk += +r[6] || 0; a.cost += +r[7] || 0; a.conv += +r[8] || 0; a.rev += +r[9] || 0; return a; }
@@ -395,8 +424,9 @@ function apiDashboard(since, until, opt) {
     r = r.slice(); r[7] = r[7] / 1.1; return r;
   });
   ensureContractSheet_();
-  var applied = applyContractCost_(rows, loadContracts_());
-  rows = applied.rows;
+  var contracts = loadContracts_();
+  var applied = applyContractCost_(rows, contracts);
+  rows = fillContractDays_(applied.rows, contracts, since, until < t ? until : t);
   if (applied.missing.length) {
     notice = (notice ? notice + ' ' : '') + '브랜드검색 계약금액 미입력: ' + applied.missing.join(', ') +
       " → 구글시트 'BS계약' 탭에 계약기간·금액을 입력하면 광고비·ROAS가 계산됩니다.";
