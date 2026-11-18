@@ -191,3 +191,23 @@ console.log(pass + ' passed (final)');
   });
 }
 console.log(pass + ' passed (gfa)');
+
+// ───── 스마트채널 / 피드 분리 ─────
+{
+  const g8 = makeEnv({ fetch: fakeNaver(), props: PROPS });
+  const C = '(Mars Pet) 스마트채널&피드';
+  t('광고그룹명으로 스마트채널/피드 분리', () => {
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_(C, '261023_브데_스마트채널_오디언스', 'x_smart 3')), JSON.stringify(['NAVER GFA_Pet', '스마트채널']));
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_(C, '261023_브데_피드_오디언스', 'x_feed 2_스퀘어형')), JSON.stringify(['NAVER GFA_Pet', '피드']));
+  });
+  t('광고그룹명에 없으면 소재명(feed/smart)으로', () => {
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Conf) 스마트채널&이미지배너', '260831_브랜드데이_오디언스', '엠앤엠즈_feed 2_스퀘어형')), JSON.stringify(['NAVER GFA_Conf', '스마트채널']));
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_(C, '오디언스', 'A_feed 1')), JSON.stringify(['NAVER GFA_Pet', '피드']));
+  });
+  t('기존 채널 분류 유지', () => {
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) NDA')), JSON.stringify(['NAVER GFA_Pet', 'NDA']));
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) ADVoost_시저')), JSON.stringify(['NAVER GFA_Pet', 'ADVoost']));
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) 쇼핑고객확장', '그룹', '소재')), JSON.stringify(['NAVER GFA_Pet', '쇼핑고객확장']));
+  });
+}
+console.log(pass + ' passed (channel)');

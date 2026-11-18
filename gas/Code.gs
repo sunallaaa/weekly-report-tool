@@ -33,7 +33,7 @@ var BS_PET_MONTHLY_BUDGET = { '그리니즈': 800000, '시저': 1700000, '템테
 var BS_PET_BRANDS = Object.keys(BS_PET_MONTHLY_BUDGET);
 var SHEET_GROUP_ORDER = {
   'NAVER GFA_Conf': ['TOTAL', 'ADVoost', 'NDA', '쇼핑프로모션'],
-  'NAVER GFA_Pet': ['TOTAL', 'ADVoost', 'NDA', '쇼핑프로모션', '스마트채널'],
+  'NAVER GFA_Pet': ['TOTAL', 'ADVoost', 'NDA', '쇼핑프로모션', '스마트채널', '피드'],
   'NAVER BS_Pet': ['TOTAL'].concat(BS_PET_BRANDS)
 };
 
@@ -482,6 +482,9 @@ function apiDashboard(since, until, opt) {
     daily: groupBy_(rows, function (r) { return r[0]; }).sort(function (a, b) { return a.key < b.key ? -1 : 1; }),
     byCampaign: groupBy_(rows, function (r) { return r[1] + '|' + r[3]; }).sort(function (a, b) { return b.cost - a.cost; }),
     byGroup: groupBy_(rows, function (r) { return r[1] + '|' + r[3] + '|' + r[4]; }).sort(function (a, b) { return b.cost - a.cost; }).slice(0, 300),
+    byChannel: groupBy_(rows.filter(function (r) { return r[1] === 'GFA' && classifyGfa_(String(r[3]), String(r[4]), String(r[10] || '')); }),
+      function (r) { var c = classifyGfa_(String(r[3]), String(r[4]), String(r[10] || '')); return c[0].replace('NAVER ', '') + '|' + c[1]; })
+      .sort(function (a, b) { return b.cost - a.cost; }),
     byCreative: groupBy_(rows.filter(function (r) { return r[10]; }), function (r) { return r[1] + '|' + r[3] + '|' + r[4] + '|' + r[10]; })
       .sort(function (a, b) { return b.cost - a.cost; }).slice(0, 300),
     spreadsheetUrl: ss_().getUrl()
@@ -547,13 +550,29 @@ function apiImportGfa() {
 }
 
 // ───────────────────────── 주간 리포트 (raw_to_report.py 규칙 이식) ─────────────────────────
-function classifyGfa_(camp) {
+/**
+ * GFA 채널 분류. 마즈는 스마트채널과 피드를 별개 채널로 본다.
+ * '스마트채널&피드'처럼 한 캠페인에 둘이 섞인 경우 광고그룹명(_스마트채널_ / _피드_) → 소재명(smart / feed) 순으로 판단.
+ */
+function classifyGfa_(camp, group, creative) {
   var sheet;
   if (camp.indexOf('(Mars Conf)') === 0) sheet = 'NAVER GFA_Conf';
   else if (camp.indexOf('(Mars Pet)') === 0) sheet = 'NAVER GFA_Pet';
   else return null;
   var name = camp.split(')').slice(1).join(')').trim(), ch = name;
-  ['ADVoost', 'NDA', '스마트채널', '쇼핑프로모션'].some(function (k) { if (name.indexOf(k) >= 0) { ch = k; return true; } return false; });
+  group = String(group || ''); creative = String(creative || '').toLowerCase();
+  if (name.indexOf('ADVoost') >= 0) ch = 'ADVoost';
+  else if (name.indexOf('NDA') >= 0) ch = 'NDA';
+  else if (name.indexOf('스마트채널') >= 0 || name.indexOf('피드') >= 0) {
+    var hasS = name.indexOf('스마트채널') >= 0, hasF = name.indexOf('피드') >= 0;
+    if (hasS && !hasF) ch = '스마트채널';
+    else if (hasF && !hasS) ch = '피드';
+    else if (group.indexOf('피드') >= 0) ch = '피드';
+    else if (group.indexOf('스마트채널') >= 0) ch = '스마트채널';
+    else if (creative.indexOf('feed') >= 0 || creative.indexOf('피드') >= 0) ch = '피드';
+    else ch = '스마트채널';
+  }
+  else if (name.indexOf('쇼핑프로모션') >= 0) ch = '쇼핑프로모션';
   return [sheet, ch];
 }
 function classifyBs_(camp, group, contracts) {
@@ -572,7 +591,7 @@ function weeklyAggregate_(raw, contracts) {
   raw.forEach(function (r) { if (r[0] < minD) minD = r[0]; if (r[0] > maxD) maxD = r[0]; });
   var agg = {};   // sheet -> group -> monday -> {label, v:[5]}
   raw.forEach(function (r) {
-    var c = r[1] === 'GFA' ? classifyGfa_(String(r[3])) : r[1] === 'NaverBS' ? classifyBs_(String(r[3]), String(r[4]), contracts) : null;
+    var c = r[1] === 'GFA' ? classifyGfa_(String(r[3]), String(r[4]), String(r[10] || '')) : r[1] === 'NaverBS' ? classifyBs_(String(r[3]), String(r[4]), contracts) : null;
     if (!c) return;
     var w = weekLabel_(r[0]);
     if (w.monday < minD || addDays_(w.monday, 6) > maxD) return;   // 앞뒤로 잘린 주 제외
