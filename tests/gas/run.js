@@ -186,8 +186,8 @@ console.log(pass + ' passed (final)');
     const a = d.byCreative.find(x => x.key.endsWith('소재A')); assert.ok(Math.abs(a.cost - 70000) < 1e-6);
   });
   const rep = g7.apiWeeklyReport().report['NAVER GFA_Pet'];
-  t('주간: 스마트채널&피드→스마트채널, 쇼핑고객확장은 별도 채널로 표시', () => {
-    assert.ok(rep['스마트채널'] && rep['쇼핑고객확장']); assert.strictEqual(rep['TOTAL'][0].v[4], 210000);
+  t('주간: 스마트채널&피드→스마트채널, 쇼핑고객확장→쇼핑프로모션', () => {
+    assert.ok(rep['스마트채널'] && rep['쇼핑프로모션'] && !rep['쇼핑고객확장']); assert.strictEqual(rep['TOTAL'][0].v[4], 210000);
   });
 }
 console.log(pass + ' passed (gfa)');
@@ -207,7 +207,7 @@ console.log(pass + ' passed (gfa)');
   t('기존 채널 분류 유지', () => {
     assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) NDA')), JSON.stringify(['NAVER GFA_Pet', 'NDA']));
     assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) ADVoost_시저')), JSON.stringify(['NAVER GFA_Pet', 'ADVoost']));
-    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) 쇼핑고객확장', '그룹', '소재')), JSON.stringify(['NAVER GFA_Pet', '쇼핑고객확장']));
+    assert.strictEqual(JSON.stringify(g8.classifyGfa_('(Mars Pet) 쇼핑고객확장', '그룹', '소재')), JSON.stringify(['NAVER GFA_Pet', '쇼핑프로모션']));
   });
 }
 console.log(pass + ' passed (channel)');

@@ -572,7 +572,7 @@ function classifyGfa_(camp, group, creative) {
     else if (creative.indexOf('feed') >= 0 || creative.indexOf('피드') >= 0) ch = '피드';
     else ch = '스마트채널';
   }
-  else if (name.indexOf('쇼핑프로모션') >= 0) ch = '쇼핑프로모션';
+  else if (name.indexOf('쇼핑프로모션') >= 0 || name.indexOf('쇼핑고객확장') >= 0) ch = '쇼핑프로모션';   // 매체 업데이트로 '쇼핑프로모션' → '쇼핑고객확장' 명칭 변경
   return [sheet, ch];
 }
 function classifyBs_(camp, group, contracts) {
