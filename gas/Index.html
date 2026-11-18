@@ -39,6 +39,18 @@
   .muted { color:var(--sub); font-size:12px; }
   .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
   canvas { max-height:340px; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr)); gap:14px; }
+  .two .panel { margin-bottom:0; }
+  .top3wrap { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; }
+  .chrow { min-width:0; }
+  .chrow h4 { margin:0 0 8px; font-size:14px; }
+  .chrow .items { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr)); gap:10px; max-width:900px; }
+  .citem { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
+  .citem .img { height:200px; background:#f1f3f5; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:12px; text-align:center; padding:6px; }
+  .citem .img img { width:100%; height:100%; object-fit:contain; }
+  .citem .b { padding:8px 10px; font-size:12px; }
+  .citem .nm { font-weight:600; font-size:12px; word-break:break-all; margin-bottom:4px; }
+  .rank { display:inline-block; background:#111827; color:#fff; border-radius:4px; padding:0 6px; margin-right:4px; font-size:11px; }
   a { color:var(--acc2); }
   @media (max-width:640px) { main { padding:12px; } .card .v { font-size:17px; } }
 </style>
@@ -77,8 +89,21 @@
     </div>
     <div id="notice"></div>
     <div class="cards" id="cards"></div>
+    <div class="panel"><h3>매체별 실적 <span class="muted" id="periodLbl"></span></h3><div class="tbl" id="tblMedia"></div></div>
+    <div class="two" style="margin-bottom:14px">
+      <div class="panel" id="brandPanel"><h3>브랜드검색 · 브랜드별</h3><div class="tbl" id="tblBrand"></div></div>
+      <div class="panel" id="channelPanel"><h3>GFA · 채널별 <span class="muted">(스마트채널·피드 분리)</span></h3><div class="tbl" id="tblChannel"></div></div>
+    </div>
     <div class="panel"><h3>일별 추이</h3><canvas id="chartDaily"></canvas></div>
-    <div class="panel" id="channelPanel" style="display:none"><h3>GFA 채널별 성과 <span class="muted">(스마트채널·피드 분리)</span></h3><div class="tbl" id="tblChannel"></div></div>
+    <div class="panel" id="top3Panel" style="display:none">
+      <h3>GFA 채널별 소재 TOP 3
+        <select id="top3By" style="margin-left:8px;font-size:12px;padding:3px 6px">
+          <option value="cost">광고비 순</option><option value="rev">매출 순</option><option value="roas">ROAS 순 (광고비 10만원↑)</option><option value="clk">클릭 순</option>
+        </select>
+      </h3>
+      <div class="top3wrap" id="top3"></div>
+      <div class="muted" id="imgNote" style="margin-top:8px"></div>
+    </div>
     <div class="panel"><h3>캠페인별 성과</h3><div class="tbl" id="tblCamp"></div></div>
     <div class="panel"><h3>광고그룹별 성과 <span class="muted">(광고비 상위 300)</span></h3><div class="tbl" id="tblGroup" style="max-height:480px;overflow:auto"></div></div>
     <div class="panel" id="creativePanel" style="display:none"><h3>소재별 성과 <span class="muted">(GFA · 광고비 상위 300)</span></h3><div class="tbl" id="tblCreative" style="max-height:480px;overflow:auto"></div></div>
@@ -210,6 +235,12 @@ function render(d) {
     options: { responsive: true, interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } }
   });
+  $('periodLbl').textContent = d.since + ' ~ ' + d.until;
+  $('tblMedia').innerHTML = table(d.byMedia || [], ['매체']);
+  $('brandPanel').style.display = (d.byBrand || []).length ? '' : 'none';
+  $('tblBrand').innerHTML = table(d.byBrand || [], ['브랜드']);
+  lastCreatives = d.creatives || [];
+  renderTop3();
   $('tblCamp').innerHTML = table(d.byCampaign, ['매체', '캠페인']);
   $('tblGroup').innerHTML = table(d.byGroup, ['매체', '캠페인', '광고그룹']);
   var ch = d.byChannel || [];
@@ -219,6 +250,55 @@ function render(d) {
   $('creativePanel').style.display = cr.length ? '' : 'none';
   $('tblCreative').innerHTML = table(cr, ['매체', '캠페인', '광고그룹', '소재']);
 }
+
+// GFA 채널별 소재 TOP3 + 드라이브 이미지
+var lastCreatives = [], imgCache = {}, imgFolder = '';
+var CH_ORDER = ['ADVoost', 'NDA', '쇼핑프로모션', '스마트채널', '피드'];
+function renderTop3() {
+  var by = $('top3By').value, groups = {};
+  lastCreatives.forEach(function (c) {
+    if (by === 'roas' && c.cost < 100000) return;
+    (groups[c.sheet + '|' + c.channel] = groups[c.sheet + '|' + c.channel] || []).push(c);
+  });
+  var keys = Object.keys(groups).sort(function (a, b) {
+    var sa = a.split('|'), sb = b.split('|');
+    if (sa[0] !== sb[0]) return sa[0] < sb[0] ? 1 : -1;   // GFA_Pet 먼저
+    var ia = CH_ORDER.indexOf(sa[1]), ib = CH_ORDER.indexOf(sb[1]);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  $('top3Panel').style.display = keys.length ? '' : 'none';
+  var need = [], h = '';
+  keys.forEach(function (k) {
+    var top = groups[k].sort(function (a, b) { return b[by] - a[by]; }).slice(0, 3);
+    h += '<div class="chrow"><h4>' + esc(k.replace('|', ' · ')) + '</h4><div class="items">';
+    top.forEach(function (c, i) {
+      need.push({ id: c.id, creative: c.creative });
+      var img = imgCache[c.creative];
+      h += '<div class="citem"><div class="img" data-cr="' + esc(c.creative) + '">' +
+        (img ? '<img src="' + esc(img) + '" alt="">' : '이미지 없음<br>소재ID ' + esc(c.id || '-')) + '</div>' +
+        '<div class="b"><div class="nm"><span class="rank">' + (i + 1) + '</span>' + esc(c.creative) + '</div>' +
+        '광고비 ' + n0(c.cost) + '원 · 매출 ' + n0(c.rev) + '원<br>ROAS ' + n0(c.roas) + '% · CTR ' + n2(c.ctr) + '% · 전환 ' + n0(c.conv) + '</div></div>';
+    });
+    h += '</div></div>';
+  });
+  $('top3').innerHTML = h;
+  var missing = need.filter(function (n) { return !(n.creative in imgCache); });
+  if (missing.length) call('apiCreativeImages', missing).then(function (r) {
+    missing.forEach(function (n) { imgCache[n.creative] = r.images[n.creative] || ''; });
+    imgFolder = r.folderUrl;
+    document.querySelectorAll('#top3 .img').forEach(function (el) {
+      var u = imgCache[el.getAttribute('data-cr')];
+      if (u) el.innerHTML = '<img src="' + esc(u) + '" alt="">';
+    });
+    noteImg(r.count);
+  }).catch(function () {});
+  else noteImg();
+}
+function noteImg(count) {
+  $('imgNote').innerHTML = '이미지는 구글 드라이브 <b>' + (imgFolder ? '<a href="' + imgFolder + '" target="_blank">마즈_GFA소재이미지</a>' : '마즈_GFA소재이미지') +
+    '</b> 폴더에 <b>소재ID.jpg</b>(또는 소재이름.jpg)로 저장하면 표시됩니다.' + (count != null ? ' (폴더 이미지 ' + count + '개)' : '');
+}
+$('top3By').onchange = renderTop3;
 
 $('btnLoad').onclick = function () { load(false); };
 $('auto').onchange = function () {

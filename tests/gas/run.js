@@ -211,3 +211,51 @@ console.log(pass + ' passed (gfa)');
   });
 }
 console.log(pass + ' passed (channel)');
+
+// ───── 매체별·브랜드별 표 + 소재 TOP3 + 드라이브 이미지 ─────
+{
+  const fakeDrive = (files) => {
+    const folder = { getId: () => 'FOLDER1', getUrl: () => 'https://drive.google.com/drive/folders/FOLDER1',
+      getFiles: () => { let i = 0; return { hasNext: () => i < files.length, next: () => files[i++] }; } };
+    return { getFolderById: (id) => { if (id !== 'FOLDER1') throw new Error('x'); return folder; },
+      getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => folder };
+  };
+  const file = (name, id, mime) => ({ getName: () => name, getId: () => id, getMimeType: () => mime || 'image/jpeg' });
+  const g9 = makeEnv({ fetch: fakeNaver(), props: PROPS });
+  const fixed = new Date('2026-11-18T03:00:00Z').getTime(); const RD = Date;
+  g9.Date = class extends RD { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } };
+  g9.DriveApp = fakeDrive([file('40289503.jpg', 'F1'), file('소재B.png', 'F2'), file('메모.txt', 'F3', 'text/plain')]);
+  g9.apiBackfill('2026-11-09', '2026-11-15');
+  const H = ['광고 소재 이름', '광고 소재 ID', '광고 그룹 이름', '광고 그룹 ID', '캠페인 이름', '캠페인 ID', '기간', '총비용', '노출수', '클릭수', '구매완료 수', '구매완료 전환매출액'];
+  const rows = [H];
+  for (let i = 0; i < 7; i++) {
+    const d = g9.addDays_('2026-11-09', i);
+    rows.push(['소재A', '40289503', '그룹_피드_1', '9', '(Mars Pet) 스마트채널&피드', '6', d, '11000', '1000', '10', '1', '50000']);
+    rows.push(['소재B', '555', '그룹_스마트채널_1', '8', '(Mars Pet) 스마트채널&피드', '6', d, '22000', '2000', '20', '2', '10000']);
+    rows.push(['소재C', '777', '그룹_피드_1', '9', '(Mars Pet) 스마트채널&피드', '6', d, '1100', '100', '1', '0', '0']);
+  }
+  g9.sheet_('GFA_업로드', null).data = rows; g9.apiImportGfa();
+  g9.setup();
+  const sh = g9._sheets['BS계약']; sh.data[2] = ['시저', '2026-11-01', '2027-01-29', 9000000, ''];
+  const d = g9.apiDashboard('2026-11-09', '2026-11-15', { media: 'ALL', vatExclude: true });
+  t('매체별 실적 표', () => {
+    const m = Object.fromEntries(d.byMedia.map(x => [x.key, x]));
+    assert.ok(m['GFA (디스플레이)'] && m['브랜드검색'] && m['검색광고(파워링크 등)']);
+    assert.ok(Math.abs(m['GFA (디스플레이)'].cost - 7 * 34100 / 1.1) < 1e-6);
+  });
+  t('브랜드검색 브랜드별 표 (계약 광고비)', () => {
+    const b = Object.fromEntries(d.byBrand.map(x => [x.key, x]));
+    assert.strictEqual(b['시저'].cost, 700000); assert.ok(b['그리니즈']);
+  });
+  t('소재 목록: 채널·소재ID 포함', () => {
+    const a = d.creatives.find(c => c.creative === '소재A');
+    assert.strictEqual(a.channel, '피드'); assert.strictEqual(a.id, '40289503'); assert.strictEqual(a.sheet, 'GFA_Pet');
+    assert.strictEqual(d.creatives.find(c => c.creative === '소재B').channel, '스마트채널');
+  });
+  t('드라이브 이미지: 소재ID 또는 소재이름 파일 매칭, 이미지 아닌 파일 제외', () => {
+    const r = g9.apiCreativeImages([{ id: '40289503', creative: '소재A' }, { id: '555', creative: '소재B' }, { id: '777', creative: '소재C' }]);
+    assert.ok(/id=F1/.test(r.images['소재A'])); assert.ok(/id=F2/.test(r.images['소재B'])); assert.ok(!r.images['소재C']);
+    assert.strictEqual(r.count, 2);
+  });
+}
+console.log(pass + ' passed (top3)');

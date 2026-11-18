@@ -46,6 +46,8 @@ function makeEnv(opts) {
     ScriptApp: { getProjectTriggers: () => [], deleteTrigger() {}, newTrigger: () => { const b = { timeBased: () => b, everyDays: () => b, atHour: () => b, inTimezone: () => b, create: () => b }; return b; } },
     Logger: { log: m => (ctx._logs = (ctx._logs || []).concat(m)) },
     HtmlService: {},
+    DriveApp: (() => { const f = { getId: () => 'EMPTY', getUrl: () => 'https://drive.google.com/drive/folders/EMPTY', getFiles: () => ({ hasNext: () => false }) };
+      return { getFolderById: () => f, getFoldersByName: () => ({ hasNext: () => false }), createFolder: () => f }; })(),
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../gas/Code.gs'), 'utf8'), ctx);

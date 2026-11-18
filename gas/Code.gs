@@ -24,7 +24,7 @@ var SHEET_RAW = 'Msrs Daily';
 var SHEET_GFA = 'GFA_업로드';
 var SHEET_WEEKLY = '주간리포트';
 var SHEET_LOG = '수집로그';
-var RAW_COLS = ['Date', 'Media', 'Device', '캠페인', '그룹', '노출', '클릭', '광고비', '구매완료수', '매출액', '소재'];   // 앞 10개는 기존 로우데이터와 동일
+var RAW_COLS = ['Date', 'Media', 'Device', '캠페인', '그룹', '노출', '클릭', '광고비', '구매완료수', '매출액', '소재', '소재ID'];   // 앞 10개는 기존 로우데이터와 동일
 var SA_MEDIA = ['NaverBS', 'NaverSA', 'NaverShopping'];
 
 // 기존 리포트 규칙 (raw_to_report.py와 동일)
@@ -49,6 +49,7 @@ var GFA_COLUMN_CANDIDATES = {
   '클릭': ['클릭', '클릭수', 'Clicks', 'clicks'],
   '광고비': ['총 비용', '총비용', '비용', '광고비', '총 비용(VAT 포함)', 'Cost', 'cost', 'spend'],
   '구매완료수': ['구매완료 수', '구매완료수', '구매 완료 수', '전환수', '구매', 'Conversions', 'purchases'],
+  '소재ID': ['광고 소재 ID', '광고소재 ID', '소재 ID', '소재ID', 'Creative ID'],
   '소재': ['광고 소재 이름', '광고소재 이름', '소재 이름', '소재명', 'Creative', 'creative'],
   '매출액': ['구매완료 전환 매출액', '구매완료 매출액', '구매완료매출액', '전환 매출액', '매출액', 'Revenue', 'revenue']
 };
@@ -273,6 +274,7 @@ function dailyCollect() {
 function setup() {
   [[SHEET_RAW, RAW_COLS], [SHEET_GFA, null], [SHEET_LOG, ['시각', '내용']]].forEach(function (x) { sheet_(x[0], x[1]); });
   ensureContractSheet_();
+  ensureImageFolder_();
   ScriptApp.getProjectTriggers().forEach(function (tr) {
     if (tr.getHandlerFunction() === 'dailyCollect') ScriptApp.deleteTrigger(tr);
   });
@@ -435,6 +437,57 @@ function liveTodayRows_(force) {
   return payload;
 }
 
+var MEDIA_LABEL = { GFA: 'GFA (디스플레이)', NaverBS: '브랜드검색', NaverSA: '검색광고(파워링크 등)', NaverShopping: '쇼핑검색' };
+
+/** GFA 소재별 실적 (채널 포함) — 화면에서 채널별 TOP3 계산용 */
+function creativeList_(rows) {
+  var m = {};
+  rows.forEach(function (r) {
+    if (r[1] !== 'GFA' || !r[10]) return;
+    var c = classifyGfa_(String(r[3]), String(r[4]), String(r[10]));
+    if (!c) return;
+    var key = c[0] + '|' + c[1] + '|' + r[10];
+    var o = m[key] || (m[key] = { sheet: c[0].replace('NAVER ', ''), channel: c[1], creative: String(r[10]), id: String(r[11] || ''), a: emptyAgg_() });
+    if (!o.id && r[11]) o.id = String(r[11]);
+    addAgg_(o.a, r);
+  });
+  return Object.keys(m).map(function (k) {
+    var o = m[k], x = kpi_(o.a);
+    x.sheet = o.sheet; x.channel = o.channel; x.creative = o.creative; x.id = o.id;
+    return x;
+  });
+}
+
+// ───────────────────────── GFA 소재 이미지 (구글 드라이브 폴더) ─────────────────────────
+// 'GFA 소재 이미지' 폴더에 이미지 파일을 '소재ID.jpg' 또는 '소재이름.jpg'로 저장하면 대시보드에 표시
+var IMAGE_FOLDER_NAME = '마즈_GFA소재이미지';
+function ensureImageFolder_() {
+  var p = props_(), id = p.getProperty('GFA_IMAGE_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { /* 삭제됨 → 새로 생성 */ } }
+  var it = DriveApp.getFoldersByName(IMAGE_FOLDER_NAME);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(IMAGE_FOLDER_NAME);
+  p.setProperty('GFA_IMAGE_FOLDER_ID', folder.getId());
+  return folder;
+}
+function stripExt_(n) { return String(n).replace(/\.[a-z0-9]+$/i, '').trim(); }
+
+/** keys: [{id, creative}] → {creative: 썸네일URL} + 폴더 주소 */
+function apiCreativeImages(keys) {
+  var folder = ensureImageFolder_(), files = folder.getFiles(), byName = {};
+  while (files.hasNext()) {
+    var f = files.next();
+    if (String(f.getMimeType()).indexOf('image/') !== 0) continue;
+    byName[stripExt_(f.getName())] = 'https://drive.google.com/thumbnail?id=' + f.getId() + '&sz=w400';
+  }
+  var names = Object.keys(byName), out = {};
+  (keys || []).forEach(function (k) {
+    var url = (k.id && byName[k.id]) || byName[k.creative];
+    if (!url && k.id) names.some(function (n) { if (n.indexOf(k.id) >= 0) { url = byName[n]; return true; } return false; });
+    if (url) out[k.creative] = url;
+  });
+  return { images: out, folderUrl: folder.getUrl(), count: names.length };
+}
+
 // ───────────────────────── 대시보드 API (google.script.run) ─────────────────────────
 /**
  * @param {string} since yyyy-MM-dd
@@ -482,6 +535,10 @@ function apiDashboard(since, until, opt) {
     daily: groupBy_(rows, function (r) { return r[0]; }).sort(function (a, b) { return a.key < b.key ? -1 : 1; }),
     byCampaign: groupBy_(rows, function (r) { return r[1] + '|' + r[3]; }).sort(function (a, b) { return b.cost - a.cost; }),
     byGroup: groupBy_(rows, function (r) { return r[1] + '|' + r[3] + '|' + r[4]; }).sort(function (a, b) { return b.cost - a.cost; }).slice(0, 300),
+    byMedia: groupBy_(rows, function (r) { return MEDIA_LABEL[r[1]] || r[1]; }).sort(function (a, b) { return b.cost - a.cost; }),
+    byBrand: groupBy_(rows.filter(function (r) { return r[1] === 'NaverBS'; }), function (r) { return brandOf_(r[4], contracts) || String(r[4]); })
+      .sort(function (a, b) { return b.cost - a.cost; }),
+    creatives: creativeList_(rows),
     byChannel: groupBy_(rows.filter(function (r) { return r[1] === 'GFA' && classifyGfa_(String(r[3]), String(r[4]), String(r[10] || '')); }),
       function (r) { var c = classifyGfa_(String(r[3]), String(r[4]), String(r[10] || '')); return c[0].replace('NAVER ', '') + '|' + c[1]; })
       .sort(function (a, b) { return b.cost - a.cost; }),
@@ -541,7 +598,7 @@ function apiImportGfa() {
     rows.push([d, 'GFA', 'ALL', camp, map['그룹'] >= 0 ? String(v[map['그룹']]).trim() : '',
       num_(v[map['노출']]), num_(v[map['클릭']]), num_(v[map['광고비']]),
       map['구매완료수'] >= 0 ? num_(v[map['구매완료수']]) : 0, map['매출액'] >= 0 ? num_(v[map['매출액']]) : 0,
-      map['소재'] >= 0 ? String(v[map['소재']]).trim() : '']);
+      map['소재'] >= 0 ? String(v[map['소재']]).trim() : '', map['소재ID'] >= 0 ? String(v[map['소재ID']]).trim() : '']);
   });
   replaceRaw_(['GFA'], Object.keys(days), rows);
   var dl = Object.keys(days).sort();
