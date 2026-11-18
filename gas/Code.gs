@@ -24,7 +24,7 @@ var SHEET_RAW = 'Msrs Daily';
 var SHEET_GFA = 'GFA_업로드';
 var SHEET_WEEKLY = '주간리포트';
 var SHEET_LOG = '수집로그';
-var RAW_COLS = ['Date', 'Media', 'Device', '캠페인', '그룹', '노출', '클릭', '광고비', '구매완료수', '매출액'];
+var RAW_COLS = ['Date', 'Media', 'Device', '캠페인', '그룹', '노출', '클릭', '광고비', '구매완료수', '매출액', '소재'];   // 앞 10개는 기존 로우데이터와 동일
 var SA_MEDIA = ['NaverBS', 'NaverSA', 'NaverShopping'];
 
 // 기존 리포트 규칙 (raw_to_report.py와 동일)
@@ -49,6 +49,7 @@ var GFA_COLUMN_CANDIDATES = {
   '클릭': ['클릭', '클릭수', 'Clicks', 'clicks'],
   '광고비': ['총 비용', '총비용', '비용', '광고비', '총 비용(VAT 포함)', 'Cost', 'cost', 'spend'],
   '구매완료수': ['구매완료 수', '구매완료수', '구매 완료 수', '전환수', '구매', 'Conversions', 'purchases'],
+  '소재': ['광고 소재 이름', '광고소재 이름', '소재 이름', '소재명', 'Creative', 'creative'],
   '매출액': ['구매완료 전환 매출액', '구매완료 매출액', '구매완료매출액', '전환 매출액', '매출액', 'Revenue', 'revenue']
 };
 
@@ -221,7 +222,9 @@ function replaceRaw_(mediaList, days, newRows) {
     var all = kept.concat(newRows).sort(function (a, b) {
       return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : (a[1] + a[3] + a[4]).localeCompare(b[1] + b[3] + b[4]);
     });
+    all = all.map(function (r) { r = r.slice(0, RAW_COLS.length); while (r.length < RAW_COLS.length) r.push(''); return r; });
     var sh = sheet_(SHEET_RAW, RAW_COLS);
+    sh.getRange(1, 1, 1, RAW_COLS.length).setValues([RAW_COLS]).setFontWeight('bold');
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, RAW_COLS.length).clearContent();
     if (all.length) {
       sh.getRange(2, 1, all.length, 1).setNumberFormat('@');   // 날짜는 텍스트로 (엑셀 호환)
@@ -453,7 +456,7 @@ function apiDashboard(since, until, opt) {
   }
   if (until >= t) { live = liveTodayRows_(opt.force); rows = rows.concat(live.rows); }
   if (opt.vatExclude) rows = rows.map(function (r) {
-    if (SA_MEDIA.indexOf(r[1]) < 0) return r;
+    if (SA_MEDIA.indexOf(r[1]) < 0 && r[1] !== 'GFA') return r;
     r = r.slice(); r[7] = r[7] / 1.1; return r;
   });
   ensureContractSheet_();
@@ -479,6 +482,8 @@ function apiDashboard(since, until, opt) {
     daily: groupBy_(rows, function (r) { return r[0]; }).sort(function (a, b) { return a.key < b.key ? -1 : 1; }),
     byCampaign: groupBy_(rows, function (r) { return r[1] + '|' + r[3]; }).sort(function (a, b) { return b.cost - a.cost; }),
     byGroup: groupBy_(rows, function (r) { return r[1] + '|' + r[3] + '|' + r[4]; }).sort(function (a, b) { return b.cost - a.cost; }).slice(0, 300),
+    byCreative: groupBy_(rows.filter(function (r) { return r[10]; }), function (r) { return r[1] + '|' + r[3] + '|' + r[4] + '|' + r[10]; })
+      .sort(function (a, b) { return b.cost - a.cost; }).slice(0, 300),
     spreadsheetUrl: ss_().getUrl()
   };
 }
@@ -532,7 +537,8 @@ function apiImportGfa() {
     days[d] = 1;
     rows.push([d, 'GFA', 'ALL', camp, map['그룹'] >= 0 ? String(v[map['그룹']]).trim() : '',
       num_(v[map['노출']]), num_(v[map['클릭']]), num_(v[map['광고비']]),
-      map['구매완료수'] >= 0 ? num_(v[map['구매완료수']]) : 0, map['매출액'] >= 0 ? num_(v[map['매출액']]) : 0]);
+      map['구매완료수'] >= 0 ? num_(v[map['구매완료수']]) : 0, map['매출액'] >= 0 ? num_(v[map['매출액']]) : 0,
+      map['소재'] >= 0 ? String(v[map['소재']]).trim() : '']);
   });
   replaceRaw_(['GFA'], Object.keys(days), rows);
   var dl = Object.keys(days).sort();
@@ -612,8 +618,10 @@ function apiWeeklyReport() {
   var contracts = loadContracts_();
   var agg = weeklyAggregate_(readRaw_(), contracts);
   var order = JSON.parse(JSON.stringify(SHEET_GROUP_ORDER));
-  Object.keys(agg['NAVER BS_Pet'] || {}).forEach(function (b) {
-    if (order['NAVER BS_Pet'].indexOf(b) < 0) order['NAVER BS_Pet'].push(b);   // 뉴트로 등 추가 브랜드
+  Object.keys(order).forEach(function (sheet) {
+    Object.keys(agg[sheet] || {}).forEach(function (b) {
+      if (order[sheet].indexOf(b) < 0) order[sheet].push(b);   // 뉴트로, 쇼핑고객확장 등 추가 브랜드/채널
+    });
   });
   var sh = sheet_(SHEET_WEEKLY, null);
   sh.clear();

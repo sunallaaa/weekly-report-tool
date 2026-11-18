@@ -18,7 +18,7 @@ assert out['signature'] == searchad.make_signature('1700000000000', 'GET', '/ncc
 print('✓ 서명 일치')
 
 # 3) 주간 리포트 수치: GAS 로우데이터 → 파이썬 build_report
-df = pd.DataFrame(out['raw'], columns=raw_builder.RAW_COLS)
+df = pd.DataFrame([r[:10] for r in out['raw']], columns=raw_builder.RAW_COLS)  # 11번째 '소재' 열은 파이썬 리포트에 없음
 wb = raw_to_report.build_report(io.BytesIO(raw_builder.to_raw_xlsx_bytes(df)))
 checked = 0
 for sheet, groups in out['report'].items():

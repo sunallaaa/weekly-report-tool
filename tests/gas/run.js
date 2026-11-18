@@ -161,3 +161,33 @@ console.log(pass + ' passed (all)');
   t('GFA 시험: 팀 이름 없으면 안내', () => assert.throws(() => none.testGfaConnection(), /GFA_TEAM_NAME/));
 }
 console.log(pass + ' passed (final)');
+
+// ───── GFA 소재 단위 + 추가 채널 ─────
+{
+  const g7 = makeEnv({ fetch: fakeNaver(), props: PROPS });
+  const fixed = new Date('2026-11-18T03:00:00Z').getTime(); const RD = Date;
+  g7.Date = class extends RD { constructor(...a) { super(...(a.length ? a : [fixed])); } static now() { return fixed; } };
+  const H = ['광고 소재 이름', '광고 소재 ID', '광고 그룹 이름', '광고 그룹 ID', '캠페인 이름', '캠페인 ID', '기간', '총비용', '노출수', '클릭수', '구매완료 수', '구매완료 전환매출액', '구매완료 광고수익률(%)'];
+  const rows = [H];
+  for (let i = 0; i < 14; i++) {
+    const d = g7.addDays_('2026-11-02', i).replace(/-/g, '.') + '.';
+    rows.push(['소재A', '1', '그룹1', '9', '(Mars Pet) 쇼핑고객확장', '7', d, '11000', '1000', '10', '1', '50000', '454']);
+    rows.push(['소재B', '2', '그룹2', '8', '(Mars Pet) 스마트채널&피드', '6', d, '22000', '2000', '20', '2', '10000', '45']);
+  }
+  g7.sheet_('GFA_업로드', null).data = rows;
+  g7.apiImportGfa();
+  t('GFA 소재명 저장 (11번째 열) + 헤더 갱신', () => {
+    const r = g7.readRaw_(); assert.ok(r.every(x => x[10] === '소재A' || x[10] === '소재B'));
+    assert.strictEqual(g7._sheets['Msrs Daily'].data[0][10], '소재');
+  });
+  const d = g7.apiDashboard('2026-11-09', '2026-11-15', { media: 'GFA', vatExclude: true });
+  t('대시보드 소재별 성과 + GFA VAT 제외', () => {
+    assert.strictEqual(d.byCreative.length, 2);
+    const a = d.byCreative.find(x => x.key.endsWith('소재A')); assert.ok(Math.abs(a.cost - 70000) < 1e-6);
+  });
+  const rep = g7.apiWeeklyReport().report['NAVER GFA_Pet'];
+  t('주간: 스마트채널&피드→스마트채널, 쇼핑고객확장은 별도 채널로 표시', () => {
+    assert.ok(rep['스마트채널'] && rep['쇼핑고객확장']); assert.strictEqual(rep['TOTAL'][0].v[4], 210000);
+  });
+}
+console.log(pass + ' passed (gfa)');
