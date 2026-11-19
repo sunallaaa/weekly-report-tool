@@ -1,10 +1,10 @@
-# /home/seonhwa_choi/docker-compose.yml 의 services: 아래에 추가
-# (소스 위치: /home/seonhwa_choi/naver-dashboard — 업로드 완료 상태)
+# /home/seonhwa_choi/docker-compose.yml 의 services: 아래에 추가 (pd-dashboard 와 같은 들여쓰기)
+# 소스 위치: /home/seonhwa_choi/naver-dashboard  (Dockerfile 이 이 폴더 바로 아래)
 
   naver-dashboard:
     build: ./naver-dashboard
     container_name: ${USERNAME}-naver-dashboard
-    restart: unless-stopped
+    restart: always
     env_file:
       - ./naver-dashboard/.env
     environment:
