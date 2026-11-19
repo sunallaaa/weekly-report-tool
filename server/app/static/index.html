@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>네이버 광고 대시보드</title>
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --sub:#6b7385; --line:#e3e6ec; --acc:#03c75a; --acc2:#2f6bff; --warn:#e8590c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  header { background:#111827; color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; font-weight:700; }
+  header .live { font-size:12px; color:#9ca3af; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--acc); margin-right:6px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  nav { display:flex; gap:4px; padding:0 20px; background:#111827; overflow-x:auto; }
+  nav button { background:none; border:0; color:#9ca3af; padding:10px 14px; font-size:14px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
+  nav button.on { color:#fff; border-color:var(--acc); }
+  main { padding:16px 20px 40px; max-width:1400px; margin:0 auto; }
+  .tab { display:none; } .tab.on { display:block; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+  select, input, button.btn, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  button.btn { cursor:pointer; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); font-weight:600; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .card .k { color:var(--sub); font-size:12px; } .card .v { font-size:20px; font-weight:700; margin-top:4px; }
+  .card .t { font-size:11px; color:var(--acc2); margin-top:2px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .panel h3 { margin:0 0 10px; font-size:15px; }
+  .tbl { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { background:#f8f9fb; color:var(--sub); font-weight:600; position:sticky; top:0; }
+  td.l, th.l { text-align:left; }
+  .up { color:#d6336c; } .down { color:#1c7ed6; }
+  .notice { background:#fff4e6; border:1px solid #ffd8a8; color:#8a4b08; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  .err { background:#fff0f0; border:1px solid #ffc9c9; color:#c92a2a; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  .muted { color:var(--sub); font-size:12px; }
+  .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
+  canvas { max-height:340px; }
+  .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr)); gap:14px; }
+  .two .panel { margin-bottom:0; }
+  .top3wrap { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; }
+  .chrow { min-width:0; }
+  .chrow h4 { margin:0 0 8px; font-size:14px; }
+  .chrow .items { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr)); gap:10px; max-width:900px; }
+  .citem { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
+  .citem .img { height:200px; background:#f1f3f5; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:12px; text-align:center; padding:6px; }
+  .citem .img img { width:100%; height:100%; object-fit:contain; }
+  .citem .b { padding:8px 10px; font-size:12px; }
+  .citem .nm { font-weight:600; font-size:12px; word-break:break-all; margin-bottom:4px; }
+  .rank { display:inline-block; background:#111827; color:#fff; border-radius:4px; padding:0 6px; margin-right:4px; font-size:11px; }
+  a { color:var(--acc2); }
+  @media (max-width:640px) { main { padding:12px; } .card .v { font-size:17px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>📡 한국마즈 네이버 광고 대시보드</h1>
+  <span class="live" id="liveInfo"></span>
+  <span style="margin-left:auto;font-size:12px;color:#9ca3af" id="who"></span>
+  <a href="admin" id="adminLink" style="display:none;color:#fff;font-size:13px">관리</a>
+  <a href="#" id="logout" style="color:#9ca3af;font-size:13px">로그아웃</a>
+</header>
+<nav>
+  <button class="on" data-tab="live">실시간 성과</button>
+  <button data-tab="trend">키워드 트렌드</button>
+</nav>
+<main>
+  <div id="msg"></div>
+
+  <!-- 실시간 -->
+  <section class="tab on" id="tab-live">
+    <div class="bar">
+      <select id="preset">
+        <option value="today">오늘 (실시간)</option>
+        <option value="yesterday">어제</option>
+        <option value="7d" selected>최근 7일 + 오늘</option>
+        <option value="lastweek">지난주 (월~일)</option>
+        <option value="month">이번 달</option>
+        <option value="custom">직접 선택</option>
+      </select>
+      <span id="customRange" style="display:none"><input type="date" id="since"> ~ <input type="date" id="until"></span>
+      <select id="media"><option value="ALL">전체 매체</option><option value="SA">검색광고</option><option value="GFA">GFA</option></select>
+      <input id="filter" placeholder="캠페인명 필터 (예: PET)" size="18">
+      <label class="muted" title="리포트(COST -vat) 기준과 맞추려면 체크. 브랜드검색 계약금액은 이미 VAT 제외"><input type="checkbox" id="vat" checked> 광고비 VAT 제외 (검색·GFA ÷1.1)</label>
+      <button class="btn pri" id="btnLoad">조회</button>
+      <label class="muted"><input type="checkbox" id="auto"> 5분마다 자동 새로고침</label>
+    </div>
+    <div id="notice"></div>
+    <div class="cards" id="cards"></div>
+    <div class="panel"><h3>매체별 실적 <span class="muted" id="periodLbl"></span></h3><div class="tbl" id="tblMedia"></div></div>
+    <div class="two" style="margin-bottom:14px">
+      <div class="panel" id="brandPanel"><h3>브랜드검색 · 브랜드별</h3><div class="tbl" id="tblBrand"></div></div>
+      <div class="panel" id="channelPanel"><h3>GFA · 채널별 <span class="muted">(스마트채널·피드 분리)</span></h3><div class="tbl" id="tblChannel"></div></div>
+    </div>
+    <div class="panel"><h3>일별 추이</h3><canvas id="chartDaily"></canvas></div>
+    <div class="panel" id="top3Panel" style="display:none">
+      <h3>GFA 채널별 소재 TOP 3
+        <select id="top3By" style="margin-left:8px;font-size:12px;padding:3px 6px">
+          <option value="cost">광고비 순</option><option value="rev">매출 순</option><option value="roas">ROAS 순 (광고비 10만원↑)</option><option value="clk">클릭 순</option>
+        </select>
+      </h3>
+      <div class="top3wrap" id="top3"></div>
+      <div class="muted" id="imgNote" style="margin-top:8px"></div>
+    </div>
+    <div class="panel"><h3>캠페인별 성과</h3><div class="tbl" id="tblCamp"></div></div>
+    <div class="panel"><h3>광고그룹별 성과 <span class="muted">(광고비 상위 300)</span></h3><div class="tbl" id="tblGroup" style="max-height:480px;overflow:auto"></div></div>
+    <div class="panel" id="creativePanel" style="display:none"><h3>소재별 성과 <span class="muted">(GFA · 광고비 상위 300)</span></h3><div class="tbl" id="tblCreative" style="max-height:480px;overflow:auto"></div></div>
+  </section>
+
+  <!-- 트렌드 -->
+  <section class="tab" id="tab-trend">
+    <div class="panel">
+      <div class="muted" style="margin-bottom:8px">네이버 데이터랩 검색어 트렌드 · 기간 내 최대 검색량 = 100 기준 상대지표 · 한 줄에 "그룹명: 키워드1, 키워드2" (최대 5줄)</div>
+      <textarea id="groups" rows="5" style="width:100%">그리니즈: 그리니즈
+시저: 시저 강아지, 시저사료
+템테이션: 템테이션 고양이, 템테이션 간식
+쉬바: 쉬바 고양이, 쉬바 파우치
+위스카스: 위스카스</textarea>
+      <div class="bar" style="margin-top:8px">
+        <input type="date" id="tSince"> ~ <input type="date" id="tUntil">
+        <select id="tUnit"><option value="date">일</option><option value="week" selected>주</option><option value="month">월</option></select>
+        <select id="tDev"><option value="">전체 기기</option><option value="pc">PC</option><option value="mo">모바일</option></select>
+        <button class="btn pri" id="btnTrend">트렌드 조회</button>
+      </div>
+    </div>
+    <div class="panel"><canvas id="chartTrend"></canvas></div>
+  </section>
+
+</main>
+
+<script>
+var charts = {}, autoTimer = null, TODAY = null;
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function n0(v) { return Math.round(v || 0).toLocaleString('ko-KR'); }
+function n2(v) { return (v || 0).toFixed(2); }
+function addDays(s, n) { var d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function showErr(e) { $('msg').innerHTML = '<div class="err">⚠️ ' + esc(e && e.message ? e.message : e) + '</div>'; }
+function clearMsg() { $('msg').innerHTML = ''; }
+function api(path, opt) {
+  return fetch(path, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, opt || {}))
+    .then(function (r) {
+      if (r.status === 401) { location.href = 'login'; throw new Error('로그인이 필요합니다.'); }
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status)); return j; });
+    });
+}
+
+// 탭
+document.querySelectorAll('nav button').forEach(function (b) {
+  b.onclick = function () {
+    document.querySelectorAll('nav button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('on', t.id === 'tab-' + b.dataset.tab); });
+  };
+});
+
+function rangeOf(p) {
+  var t = TODAY, wd = (new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7;
+  if (p === 'today') return [t, t];
+  if (p === 'yesterday') return [addDays(t, -1), addDays(t, -1)];
+  if (p === '7d') return [addDays(t, -7), t];
+  if (p === 'lastweek') { var mon = addDays(t, -wd - 7); return [mon, addDays(mon, 6)]; }
+  if (p === 'month') return [t.slice(0, 8) + '01', t];
+  return [$('since').value, $('until').value];
+}
+$('preset').onchange = function () { $('customRange').style.display = this.value === 'custom' ? '' : 'none'; };
+
+function card(k, v, t) { return '<div class="card"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (t ? '<div class="t">' + t + '</div>' : '') + '</div>'; }
+
+function table(rows, keyCols) {
+  var h = '<table><tr>' + keyCols.map(function (c) { return '<th class="l">' + c + '</th>'; }).join('') +
+    '<th>노출</th><th>클릭</th><th>CTR</th><th>광고비</th><th>CPC</th><th>전환</th><th>CPA</th><th>CVR</th><th>매출</th><th>ROAS</th></tr>';
+  rows.forEach(function (r) {
+    var ks = r.key.split('|');
+    h += '<tr>' + ks.map(function (k, i) { return '<td class="l">' + (i === 0 && keyCols[0] === '매체' ? '<span class="tag">' + esc(k) + '</span>' : esc(k)) + '</td>'; }).join('') +
+      '<td>' + n0(r.imps) + '</td><td>' + n0(r.clk) + '</td><td>' + n2(r.ctr) + '%</td><td>' + n0(r.cost) + '</td><td>' + n0(r.cpc) +
+      '</td><td>' + n0(r.conv) + '</td><td>' + n0(r.cpa) + '</td><td>' + n2(r.cvr) + '%</td><td>' + n0(r.rev) + '</td><td>' + n0(r.roas) + '%</td></tr>';
+  });
+  return rows.length ? h + '</table>' : '<div class="muted">데이터가 없습니다.</div>';
+}
+
+function drawChart(id, cfg) {
+  if (typeof Chart === 'undefined') { $(id).outerHTML = '<div class="muted" id="' + id + '">차트 라이브러리를 불러오지 못했습니다 (인터넷 연결 확인). 표는 정상입니다.</div>'; return; }
+  if (charts[id]) charts[id].destroy(); charts[id] = new Chart($(id), cfg);
+}
+
+function load(force) {
+  var r = rangeOf($('preset').value);
+  if (!r[0] || !r[1]) return showErr('기간을 선택해주세요.');
+  $('btnLoad').disabled = true; clearMsg();
+  $('btnLoad').textContent = '조회 중…';
+  var q = new URLSearchParams({ since: r[0], until: r[1], media: $('media').value, filter: $('filter').value.trim(), force: force ? 1 : 0, vat: $('vat').checked ? 1 : 0 });
+  api('api/dashboard?' + q.toString())
+    .then(render).catch(showErr)
+    .finally(function () { $('btnLoad').disabled = false; $('btnLoad').textContent = '조회'; });
+}
+
+function render(d) {
+  var T = d.total, td = d.today;
+  $('liveInfo').innerHTML = (d.liveAt ? '<span class="dot"></span>오늘 검색광고 ' + d.liveAt + ' 기준 · 네이버 집계 지연 있음' : d.since + ' ~ ' + d.until) +
+    (d.dataUntil ? ' · 저장 데이터 ~' + d.dataUntil : '');
+  $('notice').innerHTML = d.notice ? '<div class="notice">' + esc(d.notice) + '</div>' : '';
+  function tt(v) { return td ? '오늘 ' + v : ''; }
+  $('cards').innerHTML =
+    card('노출', n0(T.imps), td && tt(n0(td.imps))) + card('클릭', n0(T.clk), td && tt(n0(td.clk))) +
+    card('CTR', n2(T.ctr) + '%', td && tt(n2(td.ctr) + '%')) + card('광고비', n0(T.cost) + '원', td && tt(n0(td.cost) + '원')) +
+    card('CPC', n0(T.cpc) + '원', td && tt(n0(td.cpc) + '원')) + card('전환', n0(T.conv), td && tt(n0(td.conv))) +
+    card('매출', n0(T.rev) + '원', td && tt(n0(td.rev) + '원')) + card('ROAS', n0(T.roas) + '%', td && tt(n0(td.roas) + '%'));
+  drawChart('chartDaily', {
+    data: {
+      labels: d.daily.map(function (x) { return x.key.slice(5); }),
+      datasets: [
+        { type: 'bar', label: '광고비', data: d.daily.map(function (x) { return x.cost; }), backgroundColor: '#2f6bff', yAxisID: 'y' },
+        { type: 'bar', label: '매출', data: d.daily.map(function (x) { return x.rev; }), backgroundColor: '#03c75a', yAxisID: 'y' },
+        { type: 'line', label: 'ROAS(%)', data: d.daily.map(function (x) { return x.roas; }), borderColor: '#e8590c', backgroundColor: '#e8590c', yAxisID: 'y2', tension: .3 }
+      ]
+    },
+    options: { responsive: true, interaction: { mode: 'index', intersect: false },
+      scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } }
+  });
+  $('periodLbl').textContent = d.since + ' ~ ' + d.until;
+  $('tblMedia').innerHTML = table(d.byMedia || [], ['매체']);
+  $('brandPanel').style.display = (d.byBrand || []).length ? '' : 'none';
+  $('tblBrand').innerHTML = table(d.byBrand || [], ['브랜드']);
+  lastCreatives = d.creatives || [];
+  renderTop3();
+  $('tblCamp').innerHTML = table(d.byCampaign, ['매체', '캠페인']);
+  $('tblGroup').innerHTML = table(d.byGroup, ['매체', '캠페인', '광고그룹']);
+  var ch = d.byChannel || [];
+  $('channelPanel').style.display = ch.length ? '' : 'none';
+  $('tblChannel').innerHTML = table(ch, ['시트', '채널']);
+  var cr = d.byCreative || [];
+  $('creativePanel').style.display = cr.length ? '' : 'none';
+  $('tblCreative').innerHTML = table(cr, ['매체', '캠페인', '광고그룹', '소재']);
+}
+
+// GFA 채널별 소재 TOP3 + 드라이브 이미지
+var lastCreatives = [], imgCache = {};
+var CH_ORDER = ['ADVoost', 'NDA', '쇼핑고객확장', '스마트채널', '피드'];
+function renderTop3() {
+  var by = $('top3By').value, groups = {};
+  lastCreatives.forEach(function (c) {
+    if (by === 'roas' && c.cost < 100000) return;
+    (groups[c.sheet + '|' + c.channel] = groups[c.sheet + '|' + c.channel] || []).push(c);
+  });
+  var keys = Object.keys(groups).sort(function (a, b) {
+    var sa = a.split('|'), sb = b.split('|');
+    if (sa[0] !== sb[0]) return sa[0] < sb[0] ? 1 : -1;   // GFA_Pet 먼저
+    var ia = CH_ORDER.indexOf(sa[1]), ib = CH_ORDER.indexOf(sb[1]);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  $('top3Panel').style.display = keys.length ? '' : 'none';
+  var need = [], h = '';
+  keys.forEach(function (k) {
+    var top = groups[k].sort(function (a, b) { return b[by] - a[by]; }).slice(0, 3);
+    h += '<div class="chrow"><h4>' + esc(k.replace('|', ' · ')) + '</h4><div class="items">';
+    top.forEach(function (c, i) {
+      need.push({ id: c.id, creative: c.creative });
+      h += '<div class="citem"><div class="img" data-cr="' + esc(c.creative) + '" data-id="' + esc(c.id) + '">' +
+        '이미지 없음<br>소재ID ' + esc(c.id || '-') + '</div>' +
+        '<div class="b"><div class="nm"><span class="rank">' + (i + 1) + '</span>' + esc(c.creative) + '</div>' +
+        '광고비 ' + n0(c.cost) + '원 · 매출 ' + n0(c.rev) + '원<br>ROAS ' + n0(c.roas) + '% · CTR ' + n2(c.ctr) + '% · 전환 ' + n0(c.conv) + '</div></div>';
+    });
+    h += '</div></div>';
+  });
+  $('top3').innerHTML = h;
+  loadImages();
+}
+var imgLoaded = false;
+function loadImages() {
+  if (imgLoaded) return applyImg();
+  imgLoaded = true;
+  api('api/creative-images').then(function (r) { imgCache = r.images || {}; applyImg(); }).catch(function () {});
+}
+function applyImg() {
+  document.querySelectorAll('#top3 .img').forEach(function (el) {
+    var cr = el.getAttribute('data-cr'), id = el.getAttribute('data-id'), u = imgCache[id] || imgCache[cr];
+    if (u) el.innerHTML = '<img src="' + esc(u) + '" alt="">';
+  });
+  $('imgNote').textContent = '소재 이미지는 드라이브 소재이미지 폴더에 소재ID.jpg(또는 소재이름.jpg)로 저장하면 표시됩니다.';
+}
+$('top3By').onchange = renderTop3;
+
+$('btnLoad').onclick = function () { load(false); };
+$('auto').onchange = function () {
+  clearInterval(autoTimer);
+  if (this.checked) autoTimer = setInterval(function () { load(true); }, 5 * 60 * 1000);
+};
+
+// 트렌드
+$('btnTrend').onclick = function () {
+  var groups = $('groups').value.split('\n').map(function (l) {
+    var i = l.indexOf(':'); if (i < 0) return null;
+    var kws = l.slice(i + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    return kws.length ? { name: l.slice(0, i).trim(), keywords: kws } : null;
+  }).filter(Boolean);
+  var b = this; b.disabled = true; clearMsg();
+  api('api/trend', { method: 'POST', body: JSON.stringify({ startDate: $('tSince').value, endDate: $('tUntil').value, timeUnit: $('tUnit').value, groups: groups, device: $('tDev').value }) }).then(function (j) {
+    var res = j.results || [];
+    var colors = ['#03c75a', '#2f6bff', '#e8590c', '#ae3ec9', '#f59f00'];
+    drawChart('chartTrend', { type: 'line', data: {
+      labels: (res[0] ? res[0].data : []).map(function (p) { return p.period; }),
+      datasets: res.map(function (r, i) { return { label: r.title, data: r.data.map(function (p) { return p.ratio; }), borderColor: colors[i], backgroundColor: colors[i], tension: .3 }; })
+    }, options: { interaction: { mode: 'index', intersect: false }, scales: { y: { title: { display: true, text: '상대 검색량 (최대=100)' } } } } });
+  }).catch(function (e) { showErr((e.message || e) + ' — 개발자센터 애플리케이션의 사용 API에 "데이터랩(검색어트렌드)"가 추가되어 있는지 확인해주세요.'); })
+    .finally(function () { b.disabled = false; });
+};
+
+// 시작
+function kst() { return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); }
+TODAY = kst();
+$('tSince').value = addDays(TODAY, -180); $('tUntil').value = addDays(TODAY, -1);
+$('since').value = addDays(TODAY, -14); $('until').value = TODAY;
+$('logout').onclick = function (e) { e.preventDefault(); api('api/auth/logout', { method: 'POST' }).then(function () { location.href = 'login'; }); };
+api('api/me').then(function (m) {
+  $('who').textContent = (m.name || m.email) + (m.role === 'client' ? '' : ' · ' + ({ admin: '관리자', member: '팀원' }[m.role] || m.role));
+  if (m.role === 'admin') $('adminLink').style.display = '';
+  load(false);
+}).catch(showErr);
+</script>
+</body>
+</html>

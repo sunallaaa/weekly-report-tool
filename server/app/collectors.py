@@ -1,0 +1,197 @@
+# -*- coding: utf-8 -*-
+"""데이터 수집 — 네이버 검색광고 API + GFA(사내 게이트웨이).
+
+GFA 성과 조회 경로·응답 필드는 게이트웨이 연결 후 '관리 > GFA 탐색'에서 실제 응답을 보고
+.env 의 GFA_REPORT_PATH / GFA_REPORT_PARAMS / GFA_FIELD_MAP 으로 지정한다(코드 수정 불필요).
+"""
+import json
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
+
+import requests
+
+from . import db
+from . import settings as S
+from .rules import SA_MEDIA, daterange
+from .sa_client import SearchAdClient, fetch_daily_raw_rows
+
+KST = timezone(timedelta(hours=9))
+
+
+def today():
+    return datetime.now(KST).date()
+
+
+# ───────────────────────── 검색광고 ─────────────────────────
+def sa_client():
+    st = S.settings
+    return SearchAdClient(st.sa_customer_id, st.sa_api_key, st.sa_secret_key)
+
+
+def sa_rows(since, until, client=None):
+    rows = fetch_daily_raw_rows(client or sa_client(), since, until)
+    return [{'date': r['Date'], 'media': r['Media'], 'device': r.get('Device') or 'ALL',
+             'campaign': r['캠페인'], 'adgroup': r['그룹'], 'creative': '', 'creative_id': '',
+             'imps': r['노출'], 'clicks': r['클릭'], 'cost': r['광고비'], 'conv': r['구매완료수'],
+             'revenue': r['매출액']} for r in rows]
+
+
+def collect_sa(since, until, client=None):
+    rows = sa_rows(since, until, client)
+    return db.replace_raw(S.settings.advertiser, SA_MEDIA, since, until, rows)
+
+
+# ───────────────────────── GFA (사내 게이트웨이) ─────────────────────────
+GFA_STATUS_TEXT = {
+    400: '필수 파라미터 누락(account_id 등)', 401: 'API 키 누락 또는 불일치 (GFA_API_KEY 확인)',
+    403: '등록되지 않은 팀 / 허용되지 않은 IP / 권한 없는 계정 — 팀 이름이 맞다면 IP 제한 가능성',
+    502: '네이버 GFA API 통신 오류', 504: '네이버 GFA API 응답 시간 초과',
+}
+
+# 응답 필드명 자동 추정용 후보 (GFA_FIELD_MAP 에 없을 때)
+GFA_FIELD_CANDIDATES = {
+    'date': ['date', 'statDate', 'stat_date', 'day', 'ymd', 'period', '기간', '일자'],
+    'campaign': ['campaignName', 'campaign_name', 'campaign', '캠페인 이름'],
+    'adgroup': ['adSetName', 'adsetName', 'adGroupName', 'adgroup_name', 'adSet', '광고 그룹 이름'],
+    'creative': ['creativeName', 'creative_name', 'adName', 'ad_name', '광고 소재 이름'],
+    'creative_id': ['creativeNo', 'creativeId', 'creative_id', 'adNo', 'adId', '광고 소재 ID'],
+    'imps': ['impCount', 'impressions', 'imp', 'impCnt', 'imps', '노출'],
+    'clicks': ['clickCount', 'clicks', 'click', 'clkCnt', '클릭'],
+    'cost': ['totalCost', 'cost', 'spend', 'salesAmt', '총 비용'],
+    'conv': ['purchaseCount', 'purchases', 'convCount', 'conversions', '구매완료 수'],
+    'revenue': ['purchaseSales', 'purchaseAmount', 'purchaseRevenue', 'convAmount', 'revenue',
+                '구매완료 전환 매출액'],
+}
+
+
+class GfaError(Exception):
+    pass
+
+
+def gfa_get(path, params=None, session=None):
+    st = S.settings
+    if not st.gfa_ready:
+        raise GfaError('.env 에 GFA_API_KEY / GFA_TEAM_NAME 이 필요합니다.')
+    q = dict(params or {})
+    q['team_name'] = st.gfa_team
+    url = st.gfa_base.rstrip('/') + '/' + str(path).lstrip('/')
+    r = (session or requests).get(url, params=q, headers={'X-API-Key': st.gfa_key}, timeout=60)
+    if r.status_code != 200:
+        raise GfaError('GFA HTTP {} — {} / {}'.format(r.status_code, GFA_STATUS_TEXT.get(r.status_code, '알 수 없는 오류'),
+                                                       r.text[:300]))
+    try:
+        return r.json()
+    except ValueError:
+        raise GfaError('GFA 응답이 JSON이 아닙니다: ' + r.text[:300])
+
+
+def _records(payload):
+    """응답에서 행 목록을 찾는다 (리스트 그대로, 또는 data/list/content/rows/results/items 키)."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for k in ('data', 'list', 'content', 'rows', 'results', 'items', 'records', 'reports'):
+            v = payload.get(k)
+            if isinstance(v, list):
+                return v
+            if isinstance(v, dict):
+                inner = _records(v)
+                if inner:
+                    return inner
+    return []
+
+
+def _num(v):
+    try:
+        return float(str(v).replace(',', '')) if v not in (None, '') else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _get(rec, key):
+    """'a.b' 형태의 중첩 키 허용."""
+    cur = rec
+    for part in str(key).split('.'):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
+
+
+def resolve_field_map(sample):
+    fm = json.loads(S.settings.gfa_field_map or '{}')
+    out = {}
+    for std, cands in GFA_FIELD_CANDIDATES.items():
+        if fm.get(std):
+            out[std] = fm[std]
+        elif isinstance(sample, dict):
+            out[std] = next((c for c in cands if c in sample), None)
+    return out
+
+
+def normalize_gfa(records, fallback_date=None):
+    if not records:
+        return [], {}
+    fmap = resolve_field_map(records[0])
+    rows = []
+    for rec in records:
+        d = _get(rec, fmap['date']) if fmap.get('date') else None
+        d = str(d or fallback_date or '')[:10].replace('.', '-').replace('/', '-')
+        if len(d) == 8 and d.isdigit():
+            d = '{}-{}-{}'.format(d[:4], d[4:6], d[6:])
+        try:
+            dd = datetime.strptime(d, '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        rows.append({
+            'date': dd, 'media': 'GFA', 'device': 'ALL',
+            'campaign': str(_get(rec, fmap['campaign']) or '') if fmap.get('campaign') else '',
+            'adgroup': str(_get(rec, fmap['adgroup']) or '') if fmap.get('adgroup') else '',
+            'creative': str(_get(rec, fmap['creative']) or '') if fmap.get('creative') else '',
+            'creative_id': str(_get(rec, fmap['creative_id']) or '') if fmap.get('creative_id') else '',
+            **{k: _num(_get(rec, fmap[k])) if fmap.get(k) else 0.0
+               for k in ('imps', 'clicks', 'cost', 'conv', 'revenue')},
+        })
+    return rows, fmap
+
+
+def gfa_report_params(day):
+    st = S.settings
+    raw = st.gfa_report_params or '{}'
+    for k, v in {'{since}': str(day), '{until}': str(day), '{account}': st.gfa_account_id}.items():
+        raw = raw.replace(k, v)
+    return json.loads(raw)
+
+
+def collect_gfa(since, until, session=None):
+    """하루 단위로 조회해 저장. 반환: 저장 행 수"""
+    st = S.settings
+    if not st.gfa_report_path:
+        raise GfaError('GFA_REPORT_PATH 가 비어 있습니다. 관리 > GFA 탐색으로 경로를 확인해 .env 에 넣어주세요.')
+    rows = []
+    for d in daterange(since, until):
+        path = st.gfa_report_path.replace('{account}', quote(st.gfa_account_id or ''))
+        recs = _records(gfa_get(path, gfa_report_params(d), session=session))
+        got, _ = normalize_gfa(recs, fallback_date=d)
+        rows.extend(r for r in got if since <= r['date'] <= until)
+    return db.replace_raw(st.advertiser, ['GFA'], since, until, rows)
+
+
+# ───────────────────────── 실행 단위 ─────────────────────────
+def run_collect(since=None, until=None, sources=('sa', 'gfa')):
+    """기본: 최근 N일 재수집 (늦게 잡히는 전환 반영). 반환: {source: 행수 또는 오류문구}"""
+    st = S.settings
+    until = until or today() - timedelta(days=1)
+    since = since or until - timedelta(days=st.recollect_days - 1)
+    result = {}
+    if 'sa' in sources:
+        try:
+            result['검색광고'] = collect_sa(since, until) if st.sa_ready else '키 미설정'
+        except Exception as e:   # 한 매체 실패가 다른 매체 수집을 막지 않게
+            result['검색광고'] = '오류: {}'.format(e)
+    if 'gfa' in sources:
+        try:
+            result['GFA'] = collect_gfa(since, until) if (st.gfa_ready and st.gfa_report_path) else '설정 대기'
+        except Exception as e:
+            result['GFA'] = '오류: {}'.format(e)
+    return {'since': str(since), 'until': str(until), 'result': result}

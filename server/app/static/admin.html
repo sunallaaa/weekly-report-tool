@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관리 · 네이버 광고 대시보드</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --sub:#6b7385; --line:#e3e6ec; --acc:#03c75a; --acc2:#2f6bff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
+  header { background:#111827; color:#fff; padding:14px 20px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; } header a { color:#9ca3af; font-size:13px; }
+  main { padding:16px 20px 40px; max-width:1200px; margin:0 auto; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .panel h3 { margin:0 0 10px; font-size:15px; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  input, select, button, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  button { cursor:pointer; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); font-weight:600; }
+  button.del { color:#c92a2a; } button:disabled { opacity:.5; cursor:wait; }
+  .tbl { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { background:#f8f9fb; color:var(--sub); font-weight:600; }
+  .muted { color:var(--sub); font-size:12px; line-height:1.6; }
+  .err { background:#fff0f0; border:1px solid #ffc9c9; color:#c92a2a; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  .ok { background:#ebfbee; border:1px solid #b2f2bb; color:#2b8a3e; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+  pre { background:#f8f9fb; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:420px; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-all; }
+  .pill { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
+  .pill.client { background:#fff4e6; color:#d9480f; } .pill.admin { background:#ebfbee; color:#2b8a3e; } .pill.off { background:#f1f3f5; color:#868e96; }
+</style>
+</head>
+<body>
+<header><h1>⚙️ 관리</h1><a href="./">← 대시보드</a></header>
+<main>
+  <div id="msg"></div>
+
+  <div class="panel">
+    <h3>접근 권한 (사용자)</h3>
+    <div class="muted" style="margin-bottom:10px">
+      <b>관리자</b>: 전체 + 이 관리 화면 · <b>팀원</b>: 지정 광고주 열람 · <b>광고주</b>: 지정 광고주만 열람, 관리 메뉴 없음.<br>
+      광고주 칸에 볼 수 있는 광고주 키를 적습니다(예: <code>mars</code>, 여러 개는 쉼표). <code>*</code> = 전체. 비활성으로 바꾸면 바로 접속이 막힙니다.
+    </div>
+    <div class="bar">
+      <input id="uEmail" placeholder="이메일" size="24">
+      <input id="uName" placeholder="이름" size="8">
+      <select id="uRole"><option value="member">팀원</option><option value="admin">관리자</option><option value="client">광고주</option></select>
+      <input id="uAdv" placeholder="광고주 (예: mars)" value="*" size="12">
+      <input id="uMemo" placeholder="메모" size="14">
+      <button class="pri" id="uSave">추가 / 수정</button>
+    </div>
+    <div class="tbl" id="users"></div>
+  </div>
+
+  <div class="panel">
+    <h3>브랜드검색 계약 (CPT)</h3>
+    <div class="muted" style="margin-bottom:10px">계약 기간 동안 노출 여부와 무관하게 매일 <b>계약금액 ÷ 계약일수</b>를 광고비로 계산합니다. 금액은 <b>VAT 제외</b>.</div>
+    <div class="bar">
+      <input id="cBrand" placeholder="브랜드 (광고그룹명에 포함된 단어)" size="20">
+      <input id="cStart" type="date"> ~ <input id="cEnd" type="date">
+      <input id="cAmt" type="number" placeholder="계약금액(VAT 제외)" size="14">
+      <input id="cMemo" placeholder="메모" size="12">
+      <button class="pri" id="cSave">추가</button>
+    </div>
+    <div class="tbl" id="contracts"></div>
+  </div>
+
+  <div class="panel">
+    <h3>데이터 수집 · 리포트</h3>
+    <div id="status" class="muted">확인 중…</div>
+    <div class="bar" style="margin-top:10px">
+      <input type="date" id="kSince"> ~ <input type="date" id="kUntil">
+      <button class="pri" id="kRun">기간 수집 (최대 62일)</button>
+      <button id="rRun">주간 로우 내보내기 지금 실행</button>
+    </div>
+    <div class="muted">매일 자동 수집 · 월요일 자동 작업 일정은 위 상태에 표시됩니다. 수동 실행은 몇 분 걸릴 수 있습니다.</div>
+    <div class="tbl" id="jobs" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel">
+    <h3>월예산 확인 <span class="muted">(구글시트 '월예산' 탭)</span></h3>
+    <div class="bar"><input id="bMonth" placeholder="YYYY-MM" size="8"><button id="bLoad">불러오기</button></div>
+    <div class="tbl" id="budgets"></div>
+  </div>
+
+  <div class="panel">
+    <h3>GFA 탐색 <span class="muted">(게이트웨이 응답 확인 — 조회만, 저장 안 함)</span></h3>
+    <div class="muted" style="margin-bottom:8px">성과 조회 경로와 응답 필드명을 확인해 서버 .env 의 GFA_REPORT_PATH / GFA_REPORT_PARAMS / GFA_FIELD_MAP 에 넣습니다. 예: 경로 <code>adAccounts</code></div>
+    <div class="bar"><input id="gPath" placeholder="경로 (예: adAccounts)" size="36"><input id="gParams" placeholder='파라미터 JSON (예: {"startDate":"2026-11-01"})' size="40"><button class="pri" id="gRun">조회</button></div>
+    <div id="gOut"></div>
+  </div>
+
+  <div class="panel">
+    <h3>변경 기록</h3>
+    <div class="tbl" id="audit" style="max-height:320px;overflow:auto"></div>
+  </div>
+</main>
+<script>
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function n0(v) { return Math.round(v || 0).toLocaleString('ko-KR'); }
+function api(path, opt) {
+  return fetch(path, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, opt || {}))
+    .then(function (r) {
+      if (r.status === 401) { location.href = 'login'; throw new Error('로그인이 필요합니다.'); }
+      return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status)); return j; });
+    });
+}
+function say(t, ok) { $('msg').innerHTML = '<div class="' + (ok ? 'ok' : 'err') + '">' + esc(t) + '</div>'; window.scrollTo(0, 0); }
+function busy(b, p) { b.disabled = true; return p.finally(function () { b.disabled = false; }); }
+var ROLE = { admin: '관리자', member: '팀원', client: '광고주' };
+
+function loadUsers() {
+  api('api/admin/users').then(function (list) {
+    var h = '<table><tr><th>이메일</th><th>이름</th><th>역할</th><th>광고주</th><th>상태</th><th>마지막 로그인</th><th>메모</th><th></th></tr>';
+    list.forEach(function (u) {
+      h += '<tr><td>' + esc(u.email) + '</td><td>' + esc(u.name) + '</td><td><span class="pill ' + u.role + '">' + ROLE[u.role] + '</span></td><td>' + esc(u.advertisers) +
+        '</td><td>' + (u.active ? '활성' : '<span class="pill off">비활성</span>') + '</td><td>' + esc((u.last_login || '').slice(0, 16)) + '</td><td>' + esc(u.memo) +
+        '</td><td><button data-e="' + esc(u.email) + '" class="edit">수정</button> <button data-e="' + esc(u.email) + '" data-a="' + (u.active ? 0 : 1) + '" class="tog">' + (u.active ? '비활성' : '활성') +
+        '</button> <button class="del" data-e="' + esc(u.email) + '">삭제</button></td></tr>';
+    });
+    $('users').innerHTML = list.length ? h + '</table>' : '<div class="muted">등록된 사용자가 없습니다. (최초 관리자는 서버 설정 BOOTSTRAP_ADMIN_EMAILS 로 로그인)</div>';
+    var byEmail = {}; list.forEach(function (u) { byEmail[u.email] = u; });
+    document.querySelectorAll('#users .edit').forEach(function (b) { b.onclick = function () {
+      var u = byEmail[b.dataset.e]; $('uEmail').value = u.email; $('uName').value = u.name; $('uRole').value = u.role; $('uAdv').value = u.advertisers; $('uMemo').value = u.memo;
+    }; });
+    document.querySelectorAll('#users .tog').forEach(function (b) { b.onclick = function () {
+      var u = byEmail[b.dataset.e];
+      busy(b, api('api/admin/users', { method: 'POST', body: JSON.stringify(Object.assign({}, u, { active: b.dataset.a === '1' })) }).then(loadUsers).catch(function (e) { say(e.message); }));
+    }; });
+    document.querySelectorAll('#users .del').forEach(function (b) { b.onclick = function () {
+      if (!confirm(b.dataset.e + ' 계정을 삭제할까요?')) return;
+      busy(b, api('api/admin/users/' + encodeURIComponent(b.dataset.e), { method: 'DELETE' }).then(function () { loadUsers(); loadAudit(); }).catch(function (e) { say(e.message); }));
+    }; });
+  }).catch(function (e) { say(e.message); });
+}
+$('uSave').onclick = function () {
+  var body = { email: $('uEmail').value.trim(), name: $('uName').value.trim(), role: $('uRole').value, advertisers: $('uAdv').value.trim() || '*', active: true, memo: $('uMemo').value.trim() };
+  busy(this, api('api/admin/users', { method: 'POST', body: JSON.stringify(body) }).then(function () {
+    say(body.email + ' 저장했습니다.', true); ['uEmail', 'uName', 'uMemo'].forEach(function (k) { $(k).value = ''; }); loadUsers(); loadAudit();
+  }).catch(function (e) { say(e.message); }));
+};
+$('uRole').onchange = function () { if (this.value === 'client' && $('uAdv').value === '*') $('uAdv').value = ''; };
+
+function loadContracts() {
+  api('api/admin/contracts').then(function (list) {
+    var h = '<table><tr><th>브랜드</th><th>시작</th><th>종료</th><th>계약금액</th><th>하루 광고비</th><th>메모</th><th></th></tr>';
+    list.forEach(function (c) {
+      var days = (new Date(c.end) - new Date(c.start)) / 86400000 + 1;
+      h += '<tr><td>' + esc(c.brand) + '</td><td>' + c.start + '</td><td>' + c.end + '</td><td>' + n0(c.amount) + '</td><td>' + n0(c.amount / days) +
+        '</td><td>' + esc(c.memo) + '</td><td><button class="del" data-id="' + c.id + '">삭제</button></td></tr>';
+    });
+    $('contracts').innerHTML = list.length ? h + '</table>' : '<div class="muted">등록된 계약이 없습니다.</div>';
+    document.querySelectorAll('#contracts .del').forEach(function (b) { b.onclick = function () {
+      if (!confirm('이 계약을 삭제할까요?')) return;
+      busy(b, api('api/admin/contracts/' + b.dataset.id, { method: 'DELETE' }).then(loadContracts).catch(function (e) { say(e.message); }));
+    }; });
+  }).catch(function (e) { say(e.message); });
+}
+$('cSave').onclick = function () {
+  var body = { brand: $('cBrand').value.trim(), start: $('cStart').value, end: $('cEnd').value, amount: +$('cAmt').value, memo: $('cMemo').value.trim() };
+  busy(this, api('api/admin/contracts', { method: 'POST', body: JSON.stringify(body) }).then(function () { say('계약을 추가했습니다.', true); loadContracts(); }).catch(function (e) { say(e.message); }));
+};
+
+function loadStatus() {
+  api('api/admin/status').then(function (s) {
+    function ic(b) { return b ? '🟢' : '🔴'; }
+    var last = Object.keys(s.lastDate || {}).map(function (k) { return k + ' ~' + s.lastDate[k]; }).join(' · ') || '-';
+    $('status').innerHTML = ic(s.searchad) + ' 검색광고 API · ' + ic(s.gfa) + ' GFA 게이트웨이 키 · ' + ic(s.gfaReportPath) + ' GFA 성과 경로 · ' + ic(s.google) + ' 구글(드라이브·메일) · ' +
+      (s.pipeline ? '🟢' : '⚪') + ' 서버 엑셀 작성<br>저장 데이터: ' + esc(last) + '<br>예약: ' +
+      (s.schedule || []).map(function (j) { return esc(j.id === 'collect' ? '매일 수집' : '월요일 작업') + ' 다음 ' + esc(String(j.next).slice(0, 16)); }).join(' · ');
+  }).catch(function (e) { $('status').textContent = e.message; });
+}
+function loadJobs() {
+  api('api/admin/jobs').then(function (list) {
+    var h = '<table><tr><th>시작</th><th>종류</th><th>상태</th><th>내용</th></tr>';
+    list.forEach(function (j) {
+      h += '<tr><td>' + esc(j.started_at.slice(0, 16)) + '</td><td>' + (j.kind === 'report' ? '주간' : '수집') + '</td><td>' + (j.status === 'ok' ? '✅' : j.status === 'error' ? '❌' : '⏳') +
+        '</td><td><details><summary>보기</summary><pre>' + esc(j.message) + '</pre></details></td></tr>';
+    });
+    $('jobs').innerHTML = list.length ? h + '</table>' : '';
+  });
+}
+$('kRun').onclick = function () {
+  busy(this, api('api/admin/collect', { method: 'POST', body: JSON.stringify({ since: $('kSince').value, until: $('kUntil').value }) })
+    .then(function (r) { say('수집 완료 ' + r.since + '~' + r.until + ' : ' + JSON.stringify(r.result), true); loadStatus(); loadJobs(); })
+    .catch(function (e) { say(e.message); loadJobs(); }));
+};
+$('rRun').onclick = function () {
+  if (!confirm('당월 1일~어제 데이터를 다시 수집하고 로우 파일을 드라이브에 올립니다. 진행할까요?')) return;
+  busy(this, api('api/admin/report', { method: 'POST' }).then(function () { say('완료했습니다. 아래 작업 기록을 확인해 주세요.', true); loadJobs(); })
+    .catch(function (e) { say(e.message); loadJobs(); }));
+};
+$('bLoad').onclick = function () {
+  busy(this, api('api/admin/budgets?month=' + encodeURIComponent($('bMonth').value.trim())).then(function (r) {
+    var h = '<table><tr><th>시트</th><th>캠페인/브랜드</th><th>월예산</th><th>메모</th></tr>', t = 0;
+    r.rows.forEach(function (x) { t += x.budget; h += '<tr><td>' + esc(x.sheet) + '</td><td>' + esc(x.name) + '</td><td>' + n0(x.budget) + '</td><td>' + esc(x.memo) + '</td></tr>'; });
+    $('budgets').innerHTML = r.rows.length ? h + '<tr><th colspan="2">합계</th><th>' + n0(t) + '</th><th></th></tr></table>' : '<div class="muted">' + esc(r.month) + ' 예산이 시트에 없습니다.</div>';
+  }).catch(function (e) { say(e.message); }));
+};
+$('gRun').onclick = function () {
+  var q = new URLSearchParams({ path: $('gPath').value.trim(), params: $('gParams').value.trim() || '{}' });
+  busy(this, api('api/admin/gfa/explore?' + q.toString()).then(function (r) {
+    $('gOut').innerHTML = '<div class="muted">행 ' + r.records + '개 · 자동 추정 필드: ' + esc(JSON.stringify(r.fieldMap)) + '</div>' +
+      (r.sample.length ? '<pre>' + esc(JSON.stringify(r.sample, null, 1)) + '</pre>' : '') + '<pre>' + esc(JSON.stringify(r.raw, null, 1)) + '</pre>';
+  }).catch(function (e) { $('gOut').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }));
+};
+function loadAudit() {
+  api('api/admin/audit').then(function (list) {
+    $('audit').innerHTML = '<table><tr><th>시각(UTC)</th><th>사용자</th><th>작업</th><th>내용</th></tr>' + list.map(function (a) {
+      return '<tr><td>' + esc(a.at.slice(0, 16)) + '</td><td>' + esc(a.actor) + '</td><td>' + esc(a.action) + '</td><td>' + esc(a.detail) + '</td></tr>';
+    }).join('') + '</table>';
+  });
+}
+(function init() {
+  var t = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  $('bMonth').value = t.slice(0, 7); $('kUntil').value = new Date(Date.parse(t) - 86400000).toISOString().slice(0, 10); $('kSince').value = t.slice(0, 8) + '01';
+  loadUsers(); loadContracts(); loadStatus(); loadJobs(); loadAudit();
+})();
+</script>
+</body>
+</html>
