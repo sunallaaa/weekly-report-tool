@@ -17,12 +17,19 @@ elapsed = (base - dt.date.fromisoformat(month + '-01')).days / 30
 mtd = lambda pref: sum(r['cost'] for r in rows if r['date'][:7] == month and r['camp'].startswith(pref)) / 1.1
 days_in = int(maxd[8:10])
 bs = M.BS_DAY_TOTAL * days_in
-spec = [('NAVER GFA_Conf', 'P3', 'O4', 'O5', 'G182', 'M182', mtd('(Mars Conf)')),
-        ('NAVER GFA_Pet', 'P3', 'O4', 'O5', 'G194', 'M194', mtd('(Mars Pet)')),
-        ('NAVER BS_Pet', 'S3', 'R4', 'R5', 'G87', 'M87', bs)]
-for sh, dref, eref, pref, gref, bref, cost in spec:
+spec = [('NAVER GFA_Conf', 'P3', 'O4', 'O5', mtd('(Mars Conf)')),
+        ('NAVER GFA_Pet', 'P3', 'O4', 'O5', mtd('(Mars Pet)')),
+        ('NAVER BS_Pet', 'S3', 'R4', 'R5', bs)]
+for sh, dref, eref, pref, cost in spec:
     x = smap[sh]; t = wb.text(x)
-    budget = float(re.search(r'<c r="%s"[^>]*>(?:<f>.*?</f>)?<v>([^<]+)</v>' % bref, t).group(1))
+    fm = re.search(r'<c r="%s"[^>]*><f>\$?G\$?(\d+)/\$?M\$?(\d+)</f>' % pref, t)   # 현재 진척률 = 월누적 광고비 / 예산
+    gref, bref = 'G' + fm.group(1), 'M' + fm.group(2)
+    from core import cells as CC
+    from core.sheetmap import shared_strings
+    sm_ = re.search(r'<c r="%s"[^>]*><f>SUM\(M(\d+):M(\d+)\)</f>' % bref, t)
+    budget = sum((CC.row_cells(t, rr).get('M') or 0) for rr in range(int(sm_.group(1)), int(sm_.group(2)) + 1)
+                 if isinstance(CC.row_cells(t, rr).get('M'), float))
+    set_cache(wb, x, bref, budget)
     set_cache(wb, x, dref, serial); set_cache(wb, x, eref, elapsed)
     set_cache(wb, x, gref, cost); set_cache(wb, x, pref, cost / budget)
     print('%s 기준일 %s · 기간경과 %.1f%% · 월누적 광고비 %s / 예산 %s = %.1f%%'

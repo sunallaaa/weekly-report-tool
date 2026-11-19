@@ -10,6 +10,10 @@
 | 2 | `split_index_swap.py <marsrep> <xlsx> --apply --out` | (1회성) 2주차 이전 구조의 소재 인덱스 분리 |
 | 3 | `index_add.py <marsrep> <in> <out> <ID> <소재명> <구분> <월> <비고>` | 신규 소재 인덱스 등록 (담당자 지정값) |
 | 4 | `monthly_creative.py <result.csv> <out.csv>` | 일자별 소재 export → 소재별 월 누적 |
+| 4-1 | `index_sync.py <marsrep> <in> <참조.xlsx> <소재.csv> <out>` | 미등록 소재를 이전 보고서 인덱스 값으로 승계 등록 |
+| 4-2 | `raw_reload.py <marsrep> <in> <out> <시작일>` | 시작일 이후 RAW_all 행 제거 → merge 로 전체 재적재 (당월 1일~전일 재반영) |
+| 4-3 | 월 전환 시: 코멘트 주차라벨 정리 + calcPr 초기화 후 marsrep `monthroll.py` | 10월→11월 테스트 통과 |
+| 4-4 | `add_comment_rows.py <marsrep> <in> <out> <시트> <행> <라벨...>` + `label_sst.py` | 신규 채널 코멘트 섹션 추가 (라벨은 sharedStrings 로 → mailxl 인식) |
 | 5 | marsrep `merge.py` → `weekly.py --comments --apply` | 적재 · 주차 전환 · 코멘트 |
 | 6 | `cachefill.py <marsrep> <in> <out>` | 브랜드검색 CPT(기간 구매) 광고비 수식 + 당주차·노출창 캐시 기록 |
 | 7 | `progress.py <marsrep> <in> <out>` | 헤더 진척률 캐시 갱신 |

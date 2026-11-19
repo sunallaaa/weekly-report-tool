@@ -52,6 +52,24 @@ def main(pkg, src, dst):
         em = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r1, t)
         if not em or d2s(float(em.group(1))) < CONTRACT_START[ACTIVE_IMP[impc]]: continue
         changes.append((m, col, r0, r1, bcol, brow))
+    # 개별 수식 셀(월 전환으로 추가된 당월 행): <f>IF($M760&gt;0,$R$453,)</f>
+    plain = re.compile(r'<c r="([A-Z]+)(\d+)"([^>]*)><f>IF\(\$([A-Z]+)\d+&gt;0,\$([A-Z]+)\$(\d+),\)</f>(?:<v>[^<]*</v>)?</c>')
+    pl = []
+    for m in plain.finditer(t):
+        col, r, impc, bcol, brow = m.group(1), int(m.group(2)), m.group(4), m.group(5), m.group(6)
+        bm = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r, t)
+        if impc not in ACTIVE_IMP or not bm: continue
+        ds = d2s(float(bm.group(1))); st = CONTRACT_START[ACTIVE_IMP[impc]]
+        if ds < st: continue
+        daily = float(re.search(r'<c r="%s%s"[^>]*><v>([^<]+)</v>' % (bcol, brow), t).group(1))
+        sd = dt.date.fromisoformat(st)
+        f = ('IF(AND($B%d&gt;=DATE(%d,%d,%d),$B%d&lt;=MAX(RAW_all!$F:$F)),$%s$%s,IF($%s%d&gt;0,$%s$%s,))'
+             % (r, sd.year, sd.month, sd.day, r, bcol, brow, impc, r, bcol, brow))
+        pl.append((m, '<c r="%s%d"%s><f>%s</f><v>%r</v></c>' % (col, r, m.group(3), f, daily if ds <= maxd else 0.0)))
+    for m, new in reversed(pl):
+        t = t[:m.start()] + new + t[m.end():]
+    wb.set_text(bx, t)
+    if pl: print('  CPT 개별 수식 %d셀 (당월 일자 행)' % len(pl))
     daily_by = {}
     for m, col, r0, r1, bcol, brow in reversed(changes):
         sd = dt.date.fromisoformat(CONTRACT_START[ACTIVE_IMP[m.group(7)]])
