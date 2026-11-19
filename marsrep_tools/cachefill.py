@@ -19,6 +19,9 @@ import weekly as W
 M.CAMP_OF_LABEL.setdefault('쇼핑고객확장', {'NAVER GFA_Conf': '(Mars Conf) 쇼핑고객확장',
                                           'NAVER GFA_Pet': '(Mars Pet) 쇼핑고객확장'})
 ACTIVE_IMP = {'M': '그리니즈', 'W': '시저', 'AG': '템테이션', 'AQ': '쉬바', 'BA': '위스카스', 'BK': '뉴트로'}
+# 브랜드검색 계약 시작일 (CPT: 이 날부터 노출과 무관하게 매일 일할 광고비). 이전 기간은 원본 규칙 유지.
+CONTRACT_START = {'그리니즈': '2026-10-02', '시저': '2026-10-02', '템테이션': '2026-10-02',
+                  '쉬바': '2026-10-02', '위스카스': '2026-10-02', '뉴트로': '2026-09-30'}
 EPOCH = dt.date(1899, 12, 30)
 d2s = lambda d: (EPOCH + dt.timedelta(days=int(d))).isoformat()
 
@@ -45,24 +48,33 @@ def main(pkg, src, dst):
     for m in pat.finditer(t):
         col, r0, r1, impc, bcol, brow = m.group(2), int(m.group(3)), int(m.group(6)), m.group(7), m.group(9), m.group(10)
         bm = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r0, t)
-        if impc not in ACTIVE_IMP or not bm or d2s(float(bm.group(1)))[:7] != cur_month: continue
+        if impc not in ACTIVE_IMP: continue
+        em = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r1, t)
+        if not em or d2s(float(em.group(1))) < CONTRACT_START[ACTIVE_IMP[impc]]: continue
         changes.append((m, col, r0, r1, bcol, brow))
     daily_by = {}
     for m, col, r0, r1, bcol, brow in reversed(changes):
-        newf = m.group(1) + 'IF($B%d&lt;=MAX(RAW_all!$F:$F),$%s$%s,)' % (r0, bcol, brow) + m.group(11)
+        sd = dt.date.fromisoformat(CONTRACT_START[ACTIVE_IMP[m.group(7)]])
+        newf = m.group(1) + ('IF(AND($B%d&gt;=DATE(%d,%d,%d),$B%d&lt;=MAX(RAW_all!$F:$F)),$%s$%s,IF($%s%d&gt;0,$%s$%s,))'
+                             % (r0, sd.year, sd.month, sd.day, r0, bcol, brow, m.group(7), r0, bcol, brow)) + m.group(11)
         t = t[:m.start()] + newf + t[m.end():]
     wb.set_text(bx, t)
     for m, col, r0, r1, bcol, brow in changes:
         daily = float(re.search(r'<c r="%s%s"[^>]*><v>([^<]+)</v>' % (bcol, brow), t).group(1))
         daily_by[ACTIVE_IMP[m.group(7)]] = daily
+        st = CONTRACT_START[ACTIVE_IMP[m.group(7)]]; nset = 0
         for r in range(r0, r1 + 1):
             bm = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r, wb.text(bx))
-            set_cache(wb, bx, '%s%d' % (col, r), daily if bm and d2s(float(bm.group(1))) <= maxd else 0)
-        print('  CPT 수식 %s%d:%s%d (%s, 일 %s원)' % (col, r0, col, r1, ACTIVE_IMP[m.group(7)], format(daily, ',.0f')))
+            if not bm: continue
+            ds = d2s(float(bm.group(1)))
+            if ds < st: continue                     # 계약 이전: 원본 수식·캐시 유지
+            set_cache(wb, bx, '%s%d' % (col, r), daily if ds <= maxd else 0); nset += 1
+        print('  CPT 수식 %s%d:%s%d (%s, %s~, 일 %s원, 캐시 %d행)' % (col, r0, col, r1, ACTIVE_IMP[m.group(7)], st, format(daily, ',.0f'), nset))
     # 일자별 G(일 합계) 캐시 재계산
-    gm = re.search(r'<c r="G(\d+)"[^>]*><f t="shared" ref="G(\d+):G(\d+)"[^>]*>Q\d+\+AA', wb.text(bx))
-    if gm:
+    for gm in re.finditer(r'<c r="G(\d+)"[^>]*><f t="shared" ref="G(\d+):G(\d+)"[^>]*>Q\d+\+AA', wb.text(bx)):
         for r in range(int(gm.group(2)), int(gm.group(3)) + 1):
+            bm = re.search(r'<c r="B%d"[^>]*><v>([^<]+)</v>' % r, wb.text(bx))
+            if not bm or d2s(float(bm.group(1))) < min(CONTRACT_START.values()): continue
             s = 0.0
             for c in ('Q', 'AA', 'AK', 'AU', 'BE', 'BO', 'BY'):
                 v = re.search(r'<c r="%s%d"[^>]*>(?:<f[^>]*/>|<f[^>]*>.*?</f>)?<v>([^<]+)</v>' % (c, r), wb.text(bx), re.S)
@@ -79,7 +91,7 @@ def main(pkg, src, dst):
             ds = d.isoformat()
             for b in brands:
                 daily = M.BS_BRANDS[b] / M.BS_DAILY_DIVISOR
-                if ds[:7] == cur_month: tot += daily if ds <= maxd else 0
+                if ds >= CONTRACT_START[b]: tot += daily if ds <= maxd else 0
                 elif imp_by_day.get((b, ds), 0) > 0: tot += daily
             d += dt.timedelta(days=1)
         return tot
