@@ -305,6 +305,10 @@ def test_stat_reports_flow(monkeypatch):
 
         def post(self, url, data=None, headers=None, timeout=None):
             self.calls.append(('POST', url, data))
+            if '20261103' in data:
+                return R(400, text='{"code":10004,"message":"선택하신 조건에 지표가 확인되지 않습니다.","status":"BAD_REQUEST"}')
+            if '20261104' in data:
+                return R(400, text='{"code":11001,"message":"x"}')
             return R(200, {'reportJobId': 7 if '20261101' in data else 8})
 
         def get(self, url, params=None, headers=None, timeout=None):
@@ -323,8 +327,9 @@ def test_stat_reports_flow(monkeypatch):
     c = SearchAdClient('1', 'k', 's', session=s, sleep=0)
     import app.sa_client as m
     monkeypatch.setattr(m.time, 'sleep', lambda x: None)
-    out = c.stat_reports_tsv('AD_CONVERSION_DETAIL', [date(2026, 11, 1), date(2026, 11, 2)])
+    out = c.stat_reports_tsv('AD_CONVERSION_DETAIL', [date(2026, 11, d) for d in (1, 2, 3, 4)])
     assert out[date(2026, 11, 1)] == '20261101\tx' and out[date(2026, 11, 2)] == ''
+    assert out[date(2026, 11, 3)] == '' and isinstance(out[date(2026, 11, 4)], Exception)   # 10004=전환 0건
     assert ('GET', 'https://dl/report-download?authtoken=a') in [(a, b) for a, b, _ in s.calls]
     assert sum(1 for a, *_ in s.calls if a == 'DELETE') == 2
 

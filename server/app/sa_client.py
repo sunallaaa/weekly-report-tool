@@ -99,7 +99,8 @@ class SearchAdClient:
                 job = self.post('/stat-reports', {'reportTp': report_tp, 'statDt': d.strftime('%Y%m%d')})
                 jobs[d] = job.get('reportJobId')
             except SearchAdError as e:
-                out[d] = e
+                # 10004 '선택하신 조건에 지표가 확인되지 않습니다' = 그날 해당 지표(전환)가 0건 → 빈 보고서로 처리
+                out[d] = '' if '"code":10004' in str(e).replace(' ', '') else e
         deadline = time.time() + wait_sec
         try:
             while jobs:
