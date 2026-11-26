@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """DB — 운영은 사내 MariaDB, 테스트는 SQLite. SQLAlchemy Core만 사용."""
 import os
+import time
 from datetime import datetime
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy import (Boolean, Column, Date, DateTime, Float, Integer, MetaData, String, Table, Text,
                         create_engine, delete, select)
 
@@ -100,8 +102,17 @@ def engine():
             kw = {'connect_args': {'check_same_thread': False}}
         else:
             kw['pool_recycle'] = 3600
-        _engine = create_engine(url, **kw)
-        meta.create_all(_engine)
+        eng = create_engine(url, **kw)
+        # 서버를 켤 때 DB(MariaDB)가 아직 준비 중일 수 있어 최대 90초 기다린다
+        for i in range(30):
+            try:
+                meta.create_all(eng)
+                break
+            except OperationalError:
+                if i == 29:
+                    raise
+                time.sleep(3)
+        _engine = eng
     return _engine
 
 

@@ -1,5 +1,4 @@
-# /home/seonhwa_choi/docker-compose.yml 의 services: 아래에 추가 (pd-dashboard 와 같은 들여쓰기)
-# 소스 위치: /home/seonhwa_choi/naver-dashboard  (Dockerfile 이 이 폴더 바로 아래)
+# <홈>/docker-compose.yml 의 services: 아래, 맨 끝 "networks:" 줄 바로 위에 추가 (기존 서비스와 같은 들여쓰기)
 
   naver-dashboard:
     build: ./naver-dashboard
@@ -9,9 +8,9 @@
       - ./naver-dashboard/.env
     environment:
       - TZ=Asia/Seoul
-    expose:
-      - "8080"
     volumes:
       - ./naver-dashboard/data:/app/data
+    expose:
+      - "8080"
     depends_on:
       - mariadb
