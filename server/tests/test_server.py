@@ -410,3 +410,23 @@ def test_gfa_native_collect(app_env, monkeypatch):
     assert a['campaign'] == '(Mars Pet) ADVoost 쇼핑' and a['cost'] == 2200
     from app.rules import classify_gfa
     assert classify_gfa(a['campaign'])[1] == 'ADVoost'
+
+
+def test_admin_collect_runs_in_background(app_env, monkeypatch):
+    import threading
+    from app import main, report_job
+    gate, done = threading.Event(), threading.Event()
+
+    def slow(s, e):
+        gate.wait(5)
+        done.set()
+    monkeypatch.setattr(report_job, 'run_collect_job', slow)
+    c = app_env
+    login(c, 'boss@adef.co.kr', monkeypatch)
+    r = c.post('/api/admin/collect', json={'since': '2026-11-01', 'until': '2026-11-02'})
+    assert r.status_code == 200 and r.json()['started'] is True and not done.is_set()   # 바로 응답
+    assert c.post('/api/admin/collect', json={}).status_code == 409                    # 중복 실행 막기
+    gate.set()
+    assert done.wait(5)
+    main._bg_running['job'].join(5)
+    assert c.post('/api/admin/collect', json={'since': '2026-11-01', 'until': '2026-11-01'}).status_code == 200

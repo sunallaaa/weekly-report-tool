@@ -2,6 +2,7 @@
 """웹 서버 (FastAPI). 실행: uvicorn app.main:app --host 0.0.0.0 --port 8080 (워커 1개 — 예약작업 중복 방지)"""
 import json
 import os
+import threading
 import time
 from datetime import date, timedelta
 
@@ -286,13 +287,37 @@ def admin_collect(body: RangeIn, u=Depends(auth.require_admin)):
     if s and e and (e - s).days > 62:
         raise HTTPException(400, '한 번에 62일까지 수집할 수 있습니다. 나눠서 실행해 주세요.')
     db.log_audit(u['email'], 'collect', '{}~{}'.format(s, e))
-    return report_job.run_collect_job(s, e)
+    return _background('collect', report_job.run_collect_job, s, e)
 
 
 @app.post('/api/admin/report')
 def admin_report(u=Depends(auth.require_admin)):
     db.log_audit(u['email'], 'report_run')
-    return report_job.run_weekly_job()
+    return _background('report', report_job.run_weekly_job)
+
+
+# 수집·리포트는 몇 분 걸려 회사 서버 입구에서 화면 연결이 끊긴다(HTTP 504).
+# → 서버 안에서 따로 돌리고 화면에는 바로 '시작' 응답. 결과는 '작업 기록'에서 확인.
+_bg_lock = threading.Lock()
+_bg_running = {}
+
+
+def _background(kind, fn, *args):
+    with _bg_lock:
+        t = _bg_running.get('job')
+        if t and t.is_alive():
+            raise HTTPException(409, '이미 실행 중인 작업이 있습니다. 작업 기록에서 끝난 뒤 다시 눌러 주세요.')
+
+        def run():
+            try:
+                fn(*args)
+            except Exception:
+                pass   # 오류 내용은 작업 기록(job_runs)에 남는다
+
+        t = threading.Thread(target=run, name='admin-' + kind, daemon=True)
+        _bg_running['job'] = t
+        t.start()
+    return {'started': True, 'kind': kind}
 
 
 def _kst(dt):
