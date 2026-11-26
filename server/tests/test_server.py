@@ -238,3 +238,113 @@ def test_health_and_static(app_env):
     assert c.get('/healthz').json() == {'ok': True}
     assert c.get('/seonhwa_choi/naver/healthz').json() == {'ok': True}
     assert '인증코드' in c.get('/seonhwa_choi/naver/login').text
+
+
+CONV_TSV = (
+    "20261101\tcus\tc1\tc1g\t-\t-\tbiz\tmedia\tP\t1\tpurchase\t2\t30000\n"
+    "20261101\tcus\tc1\tc1g\t-\t-\tbiz\tmedia\tM\t2\tpurchase\t1\t10000\n"
+    "20261101\tcus\tc1\tc1g\t-\t-\tbiz\tmedia\tM\t1\tadd_to_cart\t9\t0\n"
+    "20261101\tcus\tc2\tc2g\t-\t-\tbiz\t1\t2\tmedia\tM\t1\tpurchase\t1\t5000\n"   # 열이 더 많은 형식
+)
+
+
+class FakeSA2:
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def list_campaigns(self):
+        return [{'nccCampaignId': 'c1', 'name': 'PET_브랜드검색', 'campaignTp': 'BRAND_SEARCH'},
+                {'nccCampaignId': 'c2', 'name': '파워링크', 'campaignTp': 'WEB_SITE'}]
+
+    def list_adgroups(self, cid):
+        return [{'nccAdgroupId': cid + 'g', 'nccCampaignId': cid, 'name': 'g' + cid}]
+
+    def stats(self, ids, s, u):   # 전체전환(장바구니 포함)은 12건으로 크게 나옴
+        return {'c1g': {'id': 'c1g', 'impCnt': 10, 'clkCnt': 2, 'salesAmt': 0, 'ccnt': 12, 'convAmt': 40000}}
+
+    def stat_reports_tsv(self, tp, days):
+        from app.sa_client import SearchAdError
+        assert tp == 'AD_CONVERSION_DETAIL'
+        if self.fail:
+            return {d: SearchAdError('x') for d in days}
+        return {d: (CONV_TSV if d == date(2026, 11, 1) else '') for d in days}
+
+
+def test_sa_purchase_only(app_env, monkeypatch):
+    from app import collectors, db
+    collectors.collect_sa(date(2026, 11, 1), date(2026, 11, 2), client=FakeSA2())
+    rows = {(r['date'], r['adgroup']): r for r in db.read_raw(['*'], date(2026, 11, 1), date(2026, 11, 2))}
+    bs = rows[(date(2026, 11, 1), 'gc1')]
+    assert (bs['conv'], bs['revenue']) == (3, 40000)            # 구매완료(직접2+간접1)만, 장바구니 제외
+    sa = rows[(date(2026, 11, 1), 'gc2')]                        # 노출 없던 그룹의 구매도 포함
+    assert (sa['imps'], sa['conv'], sa['revenue']) == (0, 1, 5000)
+    assert (date(2026, 11, 2), 'gc1') in rows and rows[(date(2026, 11, 2), 'gc1')]['conv'] == 0
+    # 보고서 실패 시 전체전환으로 대체하고 안내
+    r = collectors.collect_sa(date(2026, 11, 1), date(2026, 11, 1), client=FakeSA2(fail=True))
+    assert r == 1 and collectors.SA_NOTES and db.read_raw(['*'], date(2026, 11, 1), date(2026, 11, 1))[0]['conv'] == 12
+    # 진단 합계
+    b = collectors.sa_conversion_breakdown(date(2026, 11, 1), date(2026, 11, 2), client=FakeSA2())
+    got = {(x['media'], x['type'], x['method']): (x['count'], x['sales']) for x in b['rows']}
+    assert got[('NaverBS', 'purchase', '직접')] == (2, 30000) and got[('NaverBS', 'purchase', '간접')] == (1, 10000)
+    assert got[('NaverSA', 'purchase', '직접')] == (1, 5000) and ('NaverBS', 'add_to_cart', '직접') in got
+
+
+def test_stat_reports_flow(monkeypatch):
+    from app.sa_client import SearchAdClient
+
+    class R:
+        def __init__(self, code, js=None, text=''):
+            self.status_code, self._js, self.text, self.encoding = code, js, text, None
+
+        def json(self):
+            return self._js
+
+    class Sess:
+        def __init__(self):
+            self.n, self.calls = 0, []
+
+        def post(self, url, data=None, headers=None, timeout=None):
+            self.calls.append(('POST', url, data))
+            return R(200, {'reportJobId': 7 if '20261101' in data else 8})
+
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls.append(('GET', url, headers.get('X-Signature') and headers['X-Timestamp']))
+            if url.endswith('/stat-reports/7'):
+                self.n += 1
+                return R(200, {'status': 'BUILT' if self.n > 1 else 'RUNNING', 'downloadUrl': 'https://dl/report-download?authtoken=a'})
+            if url.endswith('/stat-reports/8'):
+                return R(200, {'status': 'NONE'})
+            return R(200, text='20261101\tx')
+
+        def delete(self, url, headers=None, timeout=None):
+            self.calls.append(('DELETE', url, None))
+
+    s = Sess()
+    c = SearchAdClient('1', 'k', 's', session=s, sleep=0)
+    import app.sa_client as m
+    monkeypatch.setattr(m.time, 'sleep', lambda x: None)
+    out = c.stat_reports_tsv('AD_CONVERSION_DETAIL', [date(2026, 11, 1), date(2026, 11, 2)])
+    assert out[date(2026, 11, 1)] == '20261101\tx' and out[date(2026, 11, 2)] == ''
+    assert ('GET', 'https://dl/report-download?authtoken=a') in [(a, b) for a, b, _ in s.calls]
+    assert sum(1 for a, *_ in s.calls if a == 'DELETE') == 2
+
+
+def test_gfa_get_adds_account_id(app_env, monkeypatch):
+    from app import collectors
+    seen = {}
+
+    class S_:
+        def get(self, url, params=None, headers=None, timeout=None):
+            seen.update(url=url, params=params, headers=headers)
+
+            class R:
+                status_code = 200
+
+                def json(self):
+                    return [{'adAccountNo': 123}]
+            return R()
+
+    collectors.gfa_get('adAccounts', {}, session=S_())
+    assert seen['params'] == {'team_name': 'pd1', 'account_id': '123'} and seen['url'].endswith('/gfa-proxy/adAccounts')
+    collectors.gfa_get('adAccounts', {'account_id': '9'}, session=S_())
+    assert seen['params']['account_id'] == '9'               # 직접 넣으면 그 값 우선

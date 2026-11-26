@@ -30,6 +30,11 @@ class Settings:
         self.sa_customer_id = env('NAVER_SA_CUSTOMER_ID')
         self.sa_api_key = env('NAVER_SA_API_KEY')
         self.sa_secret_key = env('NAVER_SA_SECRET_KEY')
+        # 전환 기준: report = 전환상세 보고서에서 지정 유형만(기본 구매완료, 리포트 Mars_Daily 기준)
+        #           stats  = /stats 의 전체 전환(모든 유형 합계 — 구매완료보다 크게 나옴)
+        self.sa_conv_source = env('SA_CONV_SOURCE', 'report')
+        self.sa_conv_types = env_list('SA_CONV_TYPES') or ['purchase']
+        self.sa_conv_methods = env_list('SA_CONV_METHODS')            # 비우면 직접+간접 모두
         # 네이버 데이터랩
         self.naver_client_id = env('NAVER_CLIENT_ID')
         self.naver_client_secret = env('NAVER_CLIENT_SECRET')
@@ -39,6 +44,8 @@ class Settings:
         self.gfa_key = env('GFA_API_KEY')
         self.gfa_team = env('GFA_TEAM_NAME')
         self.gfa_account_id = env('GFA_AD_ACCOUNT_NO')
+        # 게이트웨이가 모든 요청에 요구하는 계정 파라미터 이름 (안내서: account_id)
+        self.gfa_account_param = env('GFA_ACCOUNT_PARAM', 'account_id')
         # 성과 조회 경로·파라미터·필드 매핑 — 게이트웨이 연결 후 '관리 > GFA 탐색'으로 확인해 채운다
         self.gfa_report_path = env('GFA_REPORT_PATH')               # 예: adAccounts/{account}/performance
         self.gfa_report_params = env('GFA_REPORT_PARAMS', '{}')     # JSON, {since}/{until}/{account} 치환

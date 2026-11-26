@@ -13,7 +13,7 @@ import requests
 from . import db
 from . import settings as S
 from .rules import SA_MEDIA, daterange
-from .sa_client import SearchAdClient, fetch_daily_raw_rows
+from .sa_client import SearchAdClient, conversion_by_group, fetch_daily_raw_rows, parse_conversion_tsv
 
 KST = timezone(timedelta(hours=9))
 
@@ -28,8 +28,34 @@ def sa_client():
     return SearchAdClient(st.sa_customer_id, st.sa_api_key, st.sa_secret_key)
 
 
+SA_NOTES = []   # 마지막 수집에서 생긴 안내(보고서 실패로 전체전환을 쓴 날 등)
+
+
+def _purchase_override(client, since, until):
+    """구매완료만 쓰도록 날짜별 {그룹ID: (구매수, 구매매출)} 을 미리 받아 둔다.
+    보고서가 실패한 날은 None → 그날만 전체전환(/stats)으로 두고 안내에 남긴다."""
+    st = S.settings
+    if st.sa_conv_source != 'report':
+        return None
+    try:
+        tsv = client.stat_reports_tsv('AD_CONVERSION_DETAIL', list(daterange(since, until)))
+    except Exception as e:
+        SA_NOTES.append('전환보고서 요청 실패 → 전체전환 사용: {}'.format(str(e)[:150]))
+        return None
+
+    def conv(day):
+        v = tsv.get(day)
+        if isinstance(v, Exception) or v is None:
+            SA_NOTES.append('{} 전환보고서 실패 → 전체전환 사용: {}'.format(day, str(v)[:120]))
+            return None
+        return conversion_by_group(v, st.sa_conv_types, st.sa_conv_methods)
+    return conv
+
+
 def sa_rows(since, until, client=None):
-    rows = fetch_daily_raw_rows(client or sa_client(), since, until)
+    client = client or sa_client()
+    del SA_NOTES[:]
+    rows = fetch_daily_raw_rows(client, since, until, conv_override=_purchase_override(client, since, until))
     return [{'date': r['Date'], 'media': r['Media'], 'device': r.get('Device') or 'ALL',
              'campaign': r['캠페인'], 'adgroup': r['그룹'], 'creative': '', 'creative_id': '',
              'imps': r['노출'], 'clicks': r['클릭'], 'cost': r['광고비'], 'conv': r['구매완료수'],
@@ -39,6 +65,30 @@ def sa_rows(since, until, client=None):
 def collect_sa(since, until, client=None):
     rows = sa_rows(since, until, client)
     return db.replace_raw(S.settings.advertiser, SA_MEDIA, since, until, rows)
+
+
+def sa_conversion_breakdown(since, until, client=None):
+    """진단용: 기간 내 전환을 '전환유형 × 직접/간접 × 매체'로 합계 (저장 안 함).
+    Mars_Daily 구매완료 수·매출과 어느 조합이 맞는지 확인하는 데 쓴다."""
+    from .sa_client import media_of
+    client = client or sa_client()
+    media = {c['nccCampaignId']: media_of(c) for c in client.list_campaigns() if c.get('nccCampaignId')}
+    agg, errors = {}, []
+    tsv = client.stat_reports_tsv('AD_CONVERSION_DETAIL', list(daterange(since, until)))
+    for d in sorted(tsv):
+        if isinstance(tsv[d], Exception):
+            errors.append('{}: {}'.format(d, str(tsv[d])[:150]))
+            continue
+        for r in parse_conversion_tsv(tsv[d]):
+            k = (media.get(r['campaign_id'], '기타'), r['type'], r['method'])
+            a = agg.setdefault(k, [0.0, 0.0])
+            a[0] += r['count']
+            a[1] += r['sales']
+    rows = [{'media': k[0], 'type': k[1], 'method': {'1': '직접', '2': '간접'}.get(k[2], k[2]),
+             'count': v[0], 'sales': v[1]} for k, v in sorted(agg.items())]
+    return {'since': str(since), 'until': str(until), 'rows': rows, 'errors': errors,
+            'current': {'source': S.settings.sa_conv_source, 'types': S.settings.sa_conv_types,
+                        'methods': S.settings.sa_conv_methods}}
 
 
 # ───────────────────────── GFA (사내 게이트웨이) ─────────────────────────
@@ -74,6 +124,9 @@ def gfa_get(path, params=None, session=None):
         raise GfaError('.env 에 GFA_API_KEY / GFA_TEAM_NAME 이 필요합니다.')
     q = dict(params or {})
     q['team_name'] = st.gfa_team
+    # 게이트웨이는 모든 요청에 account_id 가 필요 → .env 의 GFA_AD_ACCOUNT_NO 를 자동으로 붙인다
+    if st.gfa_account_id and st.gfa_account_param and st.gfa_account_param not in q:
+        q[st.gfa_account_param] = st.gfa_account_id
     url = st.gfa_base.rstrip('/') + '/' + str(path).lstrip('/')
     r = (session or requests).get(url, params=q, headers={'X-API-Key': st.gfa_key}, timeout=60)
     if r.status_code != 200:
@@ -187,6 +240,8 @@ def run_collect(since=None, until=None, sources=('sa', 'gfa')):
     if 'sa' in sources:
         try:
             result['검색광고'] = collect_sa(since, until) if st.sa_ready else '키 미설정'
+            if SA_NOTES:
+                result['검색광고 안내'] = SA_NOTES[:5] + (['외 {}건'.format(len(SA_NOTES) - 5)] if len(SA_NOTES) > 5 else [])
         except Exception as e:   # 한 매체 실패가 다른 매체 수집을 막지 않게
             result['검색광고'] = '오류: {}'.format(e)
     if 'gfa' in sources:

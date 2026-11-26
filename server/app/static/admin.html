@@ -83,8 +83,15 @@
   </div>
 
   <div class="panel">
+    <h3>검색광고 전환 진단 <span class="muted">(조회만, 저장 안 함 · 최대 31일)</span></h3>
+    <div class="muted" style="margin-bottom:8px">전환을 유형(구매완료=purchase 등) · 직접/간접 · 매체별로 나눠 보여줍니다. 리포트 Mars_Daily 의 구매완료 수·매출과 맞는 줄을 찾는 데 씁니다. 1~3분 걸릴 수 있습니다.</div>
+    <div class="bar"><input type="date" id="vSince"> ~ <input type="date" id="vUntil"><button class="pri" id="vRun">진단</button></div>
+    <div class="tbl" id="vOut"></div>
+  </div>
+
+  <div class="panel">
     <h3>GFA 탐색 <span class="muted">(게이트웨이 응답 확인 — 조회만, 저장 안 함)</span></h3>
-    <div class="muted" style="margin-bottom:8px">성과 조회 경로와 응답 필드명을 확인해 서버 .env 의 GFA_REPORT_PATH / GFA_REPORT_PARAMS / GFA_FIELD_MAP 에 넣습니다. 예: 경로 <code>adAccounts</code></div>
+    <div class="muted" style="margin-bottom:8px">성과 조회 경로와 응답 필드명을 확인해 서버 .env 의 GFA_REPORT_PATH / GFA_REPORT_PARAMS / GFA_FIELD_MAP 에 넣습니다. 경로 칸에는 <b>API 경로</b>(예: <code>adAccounts</code>)를 넣고, 광고계정 번호(account_id)는 .env 의 GFA_AD_ACCOUNT_NO 값이 자동으로 붙습니다.</div>
     <div class="bar"><input id="gPath" placeholder="경로 (예: adAccounts)" size="36"><input id="gParams" placeholder='파라미터 JSON (예: {"startDate":"2026-11-01"})' size="40"><button class="pri" id="gRun">조회</button></div>
     <div id="gOut"></div>
   </div>
@@ -204,9 +211,24 @@ $('gRun').onclick = function () {
       (r.sample.length ? '<pre>' + esc(JSON.stringify(r.sample, null, 1)) + '</pre>' : '') + '<pre>' + esc(JSON.stringify(r.raw, null, 1)) + '</pre>';
   }).catch(function (e) { $('gOut').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }));
 };
+$('vRun').onclick = function () {
+  var q = new URLSearchParams({ since: $('vSince').value, until: $('vUntil').value });
+  $('vOut').innerHTML = '<div class="muted">⏳ 네이버 보고서를 만드는 중… (창을 닫지 마세요)</div>';
+  busy(this, api('api/admin/sa/conversions?' + q.toString()).then(function (r) {
+    var h = '<table><tr><th>매체</th><th>전환유형</th><th>직접/간접</th><th>전환수</th><th>전환매출</th></tr>', tc = {}, ts = {};
+    r.rows.forEach(function (x) {
+      h += '<tr><td>' + esc(x.media) + '</td><td>' + esc(x.type) + '</td><td>' + esc(x.method) + '</td><td>' + n0(x.count) + '</td><td>' + n0(x.sales) + '</td></tr>';
+      var k = x.media + ' · ' + x.type; tc[k] = (tc[k] || 0) + x.count; ts[k] = (ts[k] || 0) + x.sales;
+    });
+    h += '</table><div class="muted" style="margin-top:6px">합계(직접+간접): ' + Object.keys(tc).map(function (k) { return esc(k) + ' ' + n0(tc[k]) + '건 / ' + n0(ts[k]) + '원'; }).join(' · ') + '</div>';
+    h += '<div class="muted">현재 수집 기준: ' + esc(r.current.source === 'report' ? '전환유형 ' + r.current.types.join(',') + (r.current.methods.length ? ' · ' + r.current.methods.join(',') : ' · 직접+간접') : '전체전환') + '</div>';
+    if (r.errors.length) h += '<div class="err">실패한 날: ' + esc(r.errors.join(' / ')) + '</div>';
+    $('vOut').innerHTML = r.rows.length ? h : '<div class="muted">기간 내 전환이 없습니다.</div>' + (r.errors.length ? '<div class="err">' + esc(r.errors.join(' / ')) + '</div>' : '');
+  }).catch(function (e) { $('vOut').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; }));
+};
 function loadAudit() {
   api('api/admin/audit').then(function (list) {
-    $('audit').innerHTML = '<table><tr><th>시각(UTC)</th><th>사용자</th><th>작업</th><th>내용</th></tr>' + list.map(function (a) {
+    $('audit').innerHTML = '<table><tr><th>시각</th><th>사용자</th><th>작업</th><th>내용</th></tr>' + list.map(function (a) {
       return '<tr><td>' + esc(a.at.slice(0, 16)) + '</td><td>' + esc(a.actor) + '</td><td>' + esc(a.action) + '</td><td>' + esc(a.detail) + '</td></tr>';
     }).join('') + '</table>';
   });
@@ -214,6 +236,7 @@ function loadAudit() {
 (function init() {
   var t = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   $('bMonth').value = t.slice(0, 7); $('kUntil').value = new Date(Date.parse(t) - 86400000).toISOString().slice(0, 10); $('kSince').value = t.slice(0, 8) + '01';
+  $('vSince').value = $('kSince').value; $('vUntil').value = $('kUntil').value;
   loadUsers(); loadContracts(); loadStatus(); loadJobs(); loadAudit();
 })();
 </script>

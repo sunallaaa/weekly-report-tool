@@ -76,6 +76,68 @@ class SearchAdClient:
         raise SearchAdError('GET {} 재시도 실패 (HTTP {}): {}'.format(
             uri, getattr(last, 'status_code', '?'), getattr(last, 'text', '')[:300]))
 
+    def post(self, uri, body):
+        r = self.session.post(self.base_url + uri, data=json.dumps(body), headers=self._headers('POST', uri), timeout=30)
+        if r.status_code >= 400:
+            raise SearchAdError('POST {} → HTTP {}: {}'.format(uri, r.status_code, r.text[:300]))
+        return r.json()
+
+    def delete(self, uri):
+        try:
+            self.session.delete(self.base_url + uri, headers=self._headers('DELETE', uri), timeout=30)
+        except Exception:
+            pass
+
+    # ── 대용량 보고서(StatReport) ──────────────────────────
+    def stat_reports_tsv(self, report_tp, days, wait_sec=300):
+        """여러 날의 대용량 보고서를 한꺼번에 요청해 {날짜: TSV문자열} 로 받는다 (공식 샘플과 같은 절차).
+        POST /stat-reports → GET /stat-reports/{id} 상태 BUILT → downloadUrl 다운로드(서명 uri=/report-download)
+        데이터가 없는 날은 '', 실패한 날은 SearchAdError 객체가 값으로 들어간다."""
+        jobs, out = {}, {}
+        for d in days:
+            try:
+                job = self.post('/stat-reports', {'reportTp': report_tp, 'statDt': d.strftime('%Y%m%d')})
+                jobs[d] = job.get('reportJobId')
+            except SearchAdError as e:
+                out[d] = e
+        deadline = time.time() + wait_sec
+        try:
+            while jobs:
+                for d, jid in list(jobs.items()):
+                    st = self.get('/stat-reports/{}'.format(jid))
+                    status = st.get('status')
+                    if status == 'BUILT':
+                        r = self.session.get(st.get('downloadUrl'), headers=self._headers('GET', '/report-download'),
+                                             timeout=60)
+                        if r.status_code >= 400:
+                            out[d] = SearchAdError('보고서 다운로드 HTTP {}: {}'.format(r.status_code, r.text[:200]))
+                        else:
+                            r.encoding = 'utf-8'
+                            out[d] = r.text
+                    elif status == 'NONE':
+                        out[d] = ''
+                    elif status in ('ERROR', 'AGGREGATING_ERROR'):
+                        out[d] = SearchAdError('보고서 생성 오류 ({})'.format(status))
+                    else:
+                        continue
+                    self.delete('/stat-reports/{}'.format(jobs.pop(d)))
+                if jobs:
+                    if time.time() > deadline:
+                        for d in jobs:
+                            out[d] = SearchAdError('보고서 생성 대기 시간 초과')
+                        break
+                    time.sleep(2)
+        finally:
+            for jid in jobs.values():
+                self.delete('/stat-reports/{}'.format(jid))
+        return out
+
+    def stat_report_tsv(self, report_tp, stat_dt):
+        v = self.stat_reports_tsv(report_tp, [stat_dt])[stat_dt]
+        if isinstance(v, Exception):
+            raise v
+        return v
+
     # ── 구조 조회 ─────────────────────────────────────────
     def list_campaigns(self):
         return self.get('/ncc/campaigns') or []
@@ -146,7 +208,39 @@ def daterange(since, until):
         d += timedelta(days=1)
 
 
-def fetch_daily_raw_rows(client, since, until, campaign_filter=None, progress=None):
+# 전환 상세 보고서(AD_CONVERSION_DETAIL) — 머리글 없는 TSV.
+# 열 순서(네이버 문서): Date, CUSTOMER ID, Campaign ID, AD Group ID, AD keyword ID, AD ID, Business Channel ID,
+#   (버전에 따라 Hours/Region 이 더 있을 수 있음), Media code, PC Mobile Type,
+#   Conversion Method, Conversion Type, Conversion count, Sales by conversion
+# → 앞쪽은 위치, 뒤쪽 4개는 '끝에서부터' 읽어 열 개수 차이에 흔들리지 않게 한다.
+def parse_conversion_tsv(text):
+    out = []
+    for line in (text or '').splitlines():
+        f = line.rstrip('\r').split('\t')
+        if len(f) < 8 or not f[0][:1].isdigit():
+            continue   # 머리글/빈 줄 건너뜀
+        out.append({'date': f[0], 'campaign_id': f[2], 'adgroup_id': f[3], 'method': f[-4].strip(),
+                    'type': f[-3].strip().lower(), 'count': _num(f[-2]), 'sales': _num(f[-1])})
+    return out
+
+
+def conversion_by_group(tsv_text, types=('purchase',), methods=()):
+    """하루치 TSV → {광고그룹ID: (전환수, 전환매출)} — 지정한 전환유형(기본 구매완료)만 합산"""
+    recs = parse_conversion_tsv(tsv_text)
+    types = {t.lower() for t in types if t}
+    agg = {}
+    for r in recs:
+        if types and r['type'] not in types:
+            continue
+        if methods and r['method'] not in methods:
+            continue
+        a = agg.setdefault(r['adgroup_id'], [0.0, 0.0])
+        a[0] += r['count']
+        a[1] += r['sales']
+    return {k: tuple(v) for k, v in agg.items()}
+
+
+def fetch_daily_raw_rows(client, since, until, campaign_filter=None, progress=None, conv_override=None):
     """광고그룹 단위 일별 통계를 로우데이터 행(dict) 목록으로 반환.
 
     컬럼: Date, Media, Device, 캠페인, 그룹, 노출, 클릭, 광고비, 구매완료수, 매출액
@@ -170,11 +264,21 @@ def fetch_daily_raw_rows(client, since, until, campaign_filter=None, progress=No
         if progress:
             progress(n, len(days), d)
         stats = client.stats(group_by_id.keys(), d, d)
+        conv = conv_override(d) if conv_override else None   # {그룹ID: (구매수, 구매매출)} 또는 None
+        if conv:
+            for gid in conv:   # 노출·클릭이 없는 날 잡힌 구매도 빠뜨리지 않게
+                if gid in group_by_id and gid not in stats:
+                    stats[gid] = {'id': gid}
         for gid, s in stats.items():
+            if gid not in group_by_id:
+                continue
             g = group_by_id[gid]
             c = camp_by_id.get(g.get('nccCampaignId'), {})
             imps, clicks = _num(s.get('impCnt')), _num(s.get('clkCnt'))
-            if imps == 0 and clicks == 0 and _num(s.get('salesAmt')) == 0:
+            if conv is not None:
+                cnt, sales = conv.get(gid, (0.0, 0.0))
+                s = dict(s, ccnt=cnt, convAmt=sales)
+            if imps == 0 and clicks == 0 and _num(s.get('salesAmt')) == 0 and _num(s.get('ccnt')) == 0:
                 continue
             rows.append({
                 'Date': d,
@@ -182,6 +286,7 @@ def fetch_daily_raw_rows(client, since, until, campaign_filter=None, progress=No
                 'Device': 'ALL',
                 '캠페인': c.get('name', ''),
                 '그룹': g.get('name', ''),
+                '그룹ID': gid,
                 '노출': int(imps),
                 '클릭': int(clicks),
                 '광고비': _num(s.get('salesAmt')),

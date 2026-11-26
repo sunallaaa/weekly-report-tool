@@ -295,10 +295,31 @@ def admin_report(u=Depends(auth.require_admin)):
     return report_job.run_weekly_job()
 
 
+def _kst(dt):
+    """DB에는 UTC로 저장 → 화면에는 한국시간으로"""
+    return str(dt + timedelta(hours=9)) if dt else ''
+
+
 @app.get('/api/admin/jobs')
 def admin_jobs(u=Depends(auth.require_admin)):
-    return [dict(j, started_at=str(j['started_at']), finished_at=str(j['finished_at'] or ''))
+    return [dict(j, started_at=_kst(j['started_at']), finished_at=_kst(j['finished_at']))
             for j in report_job.recent_jobs()]
+
+
+@app.get('/api/admin/sa/conversions')
+def admin_sa_conversions(since: str, until: str, u=Depends(auth.require_admin)):
+    """검색광고 전환을 유형·직접/간접·매체별로 합계 (조회만, 저장 안 함) — 구매완료 기준 확인용"""
+    s, e = _d(since, None), _d(until, None)
+    if not (s and e and e >= s):
+        raise HTTPException(400, '기간을 확인해 주세요.')
+    if (e - s).days > 31:
+        raise HTTPException(400, '진단은 한 번에 31일까지 가능합니다.')
+    if not S.settings.sa_ready:
+        raise HTTPException(503, '검색광고 키가 설정되지 않았습니다.')
+    try:
+        return collectors.sa_conversion_breakdown(s, e)
+    except Exception as ex:
+        raise HTTPException(502, '검색광고 보고서 오류: {}'.format(str(ex)[:300]))
 
 
 @app.get('/api/admin/status')
@@ -343,5 +364,5 @@ def admin_budgets(month: str = '', u=Depends(auth.require_admin)):
 @app.get('/api/admin/audit')
 def admin_audit(u=Depends(auth.require_admin)):
     with db.engine().connect() as c:
-        return [dict(r._mapping, at=str(r.at)) for r in
+        return [dict(r._mapping, at=_kst(r.at)) for r in
                 c.execute(select(db.audit).order_by(db.audit.c.id.desc()).limit(200))]
