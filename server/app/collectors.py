@@ -216,11 +216,142 @@ def gfa_report_params(day):
     return json.loads(raw)
 
 
-def collect_gfa(since, until, session=None):
-    """하루 단위로 조회해 저장. 반환: 저장 행 수"""
+# ── 네이버 GFA 공식 API 경로로 수집 (공식 문서 naver-ad-api.github.io/developers 기준) ──
+#   성과:  adAccounts/{계정}/performance/past/{creatives|assetGroups}?startDate&endDate&timeUnit=daily  → rows[], next
+#   전환:  adAccounts/{계정}/performance/conversion/past/{…}  → rows[].convType (PURCHASE=구매완료)
+#   이름:  adAccounts/{계정}/campaigns | adSets | creatives  (page/size, content[], last)
+GFA_CHUNK_DAYS = 31
+GFA_NOTES = []
+
+
+def _gfa_list(path, extra=None, session=None):
+    """페이지로 나뉜 목록(content/last)을 끝까지 읽는다."""
+    out, page = [], 0
+    while page < 200:
+        payload = gfa_get(path, dict(extra or {}, page=page, size=100), session=session)
+        out.extend(_records(payload))
+        if not isinstance(payload, dict) or payload.get('last', True) or not _records(payload):
+            break
+        page += 1
+    return out
+
+
+def _gfa_rows(path, params, session=None):
+    """성과 응답(rows/next)을 다음 페이지 토큰이 없을 때까지 읽는다."""
+    out, q = [], dict(params)
+    for _ in range(500):
+        payload = gfa_get(path, q, session=session)
+        out.extend(_records(payload))
+        nxt = payload.get('next') if isinstance(payload, dict) else None
+        if not nxt:
+            break
+        q['next'] = nxt
+    return out
+
+
+def gfa_names(acc, session=None):
+    base = 'adAccounts/{}'.format(acc)
+    names = {'campaign': {}, 'adset': {}, 'creative': {}}
+    for extra in ({}, {'deleteOnly': 'true'}):   # 삭제된 소재도 과거 성과가 있으니 이름을 함께 받는다
+        try:
+            for c in _gfa_list(base + '/campaigns', extra, session):
+                names['campaign'][str(c.get('no'))] = c.get('name') or ''
+            for g in _gfa_list(base + '/adSets', extra, session):
+                names['adset'][str(g.get('no'))] = (g.get('name') or '', str(g.get('campaignNo') or ''),
+                                                    g.get('campaignName') or '')
+            for c in _gfa_list(base + '/creatives', extra, session):
+                names['creative'][str(c.get('no'))] = (c.get('name') or '', str(c.get('adSetNo') or ''))
+        except GfaError as e:
+            if not extra:
+                raise
+            GFA_NOTES.append('삭제 항목 이름 조회 생략: {}'.format(str(e)[:100]))
+    return names
+
+
+def _gfa_date(v):
+    d = str(v or '')[:10].replace('.', '-').replace('/', '-')
+    if len(d) >= 8 and d[:8].isdigit():
+        d = '{}-{}-{}'.format(d[:4], d[4:6], d[6:8])
+    try:
+        return datetime.strptime(d, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def gfa_native_rows(since, until, session=None):
     st = S.settings
+    acc = st.gfa_account_id
+    base = 'adAccounts/{}/performance'.format(acc)
+    names = gfa_names(acc, session)
+    agg = {}
+
+    def key(r, level):
+        d = _gfa_date(r.get('targetDate'))
+        if not d or not (since <= d <= until):
+            return None
+        if level == 'creatives':
+            return (d, 'c', str(r.get('creativeNo') or ''), str(r.get('adSetNo') or ''), str(r.get('campaignNo') or ''))
+        return (d, 'a', str(r.get('assetGroupNo') or ''), '', str(r.get('campaignNo') or ''))
+
+    s = since
+    while s <= until:
+        e = min(until, s + timedelta(days=GFA_CHUNK_DAYS - 1))
+        q = {'startDate': str(s), 'endDate': str(e), 'timeUnit': 'daily'}
+        for level in ('creatives', 'assetGroups'):
+            try:
+                perf = _gfa_rows('{}/past/{}'.format(base, level), q, session)
+                conv = _gfa_rows('{}/conversion/past/{}'.format(base, level), q, session)
+            except GfaError as ex:
+                if level == 'creatives':
+                    raise
+                GFA_NOTES.append('애셋그룹(ADV쇼핑) 성과 조회 실패: {}'.format(str(ex)[:120]))
+                continue
+            for r in perf:
+                k = key(r, level)
+                if k:
+                    a = agg.setdefault(k, [0.0] * 5)
+                    a[0] += _num(r.get('impCount'))
+                    a[1] += _num(r.get('clickCount'))
+                    a[2] += _num(r.get('sales'))          # 광고비 (네이버 응답 필드명 sales)
+            for r in conv:
+                if str(r.get('convType') or '').upper() not in st.gfa_conv_types:
+                    continue
+                k = key(r, level)
+                if k:
+                    a = agg.setdefault(k, [0.0] * 5)
+                    a[3] += _num(r.get('convCount'))
+                    a[4] += _num(r.get('convSales'))
+        s = e + timedelta(days=1)
+
+    rows = []
+    for (d, kind, no, adset_no, camp_no), v in agg.items():
+        if not any(v):
+            continue
+        if kind == 'c':
+            cname, cadset = names['creative'].get(no, ('', ''))
+            adset_no = adset_no or cadset
+            gname, gcamp, gcampname = names['adset'].get(adset_no, ('', '', ''))
+            camp_no = camp_no or gcamp
+            campaign = names['campaign'].get(camp_no) or gcampname or '캠페인 {}'.format(camp_no)
+            adgroup, creative, cid = gname or '광고그룹 {}'.format(adset_no), cname or '소재 {}'.format(no), no
+        else:
+            campaign = names['campaign'].get(camp_no) or '캠페인 {}'.format(camp_no)
+            adgroup, creative, cid = '애셋그룹 {}'.format(no), '', ''
+        rows.append({'date': d, 'media': 'GFA', 'device': 'ALL', 'campaign': campaign, 'adgroup': adgroup,
+                     'creative': creative, 'creative_id': cid, 'imps': v[0], 'clicks': v[1], 'cost': v[2],
+                     'conv': v[3], 'revenue': v[4]})
+    return rows
+
+
+def collect_gfa(since, until, session=None):
+    """반환: 저장 행 수. GFA_REPORT_PATH 가 비어 있으면 네이버 공식 경로로 수집한다."""
+    st = S.settings
+    del GFA_NOTES[:]
     if not st.gfa_report_path:
-        raise GfaError('GFA_REPORT_PATH 가 비어 있습니다. 관리 > GFA 탐색으로 경로를 확인해 .env 에 넣어주세요.')
+        if not st.gfa_account_id:
+            raise GfaError('.env 에 GFA_AD_ACCOUNT_NO(광고계정 번호)가 필요합니다.')
+        rows = gfa_native_rows(since, until, session)
+        return db.replace_raw(st.advertiser, ['GFA'], since, until, rows)
     rows = []
     for d in daterange(since, until):
         path = st.gfa_report_path.replace('{account}', quote(st.gfa_account_id or ''))
@@ -246,7 +377,9 @@ def run_collect(since=None, until=None, sources=('sa', 'gfa')):
             result['검색광고'] = '오류: {}'.format(e)
     if 'gfa' in sources:
         try:
-            result['GFA'] = collect_gfa(since, until) if (st.gfa_ready and st.gfa_report_path) else '설정 대기'
+            result['GFA'] = collect_gfa(since, until) if st.gfa_collect_ready else '설정 대기'
+            if GFA_NOTES:
+                result['GFA 안내'] = GFA_NOTES[:5]
         except Exception as e:
             result['GFA'] = '오류: {}'.format(e)
     return {'since': str(since), 'until': str(until), 'result': result}

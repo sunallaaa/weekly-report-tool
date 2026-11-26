@@ -329,7 +329,7 @@ def admin_status(u=Depends(auth.require_admin)):
         last = {r[0]: str(r[1]) for r in c.execute(
             select(db.raw.c.media, func.max(db.raw.c.date)).group_by(db.raw.c.media))}
     from . import scheduler
-    return {'searchad': st.sa_ready, 'gfa': st.gfa_ready, 'gfaReportPath': bool(st.gfa_report_path),
+    return {'searchad': st.sa_ready, 'gfa': st.gfa_ready, 'gfaReportPath': st.gfa_collect_ready,
             'google': st.google_ready, 'pipeline': bool(st.pipeline_cmd), 'lastDate': last,
             'schedule': scheduler.describe()}
 

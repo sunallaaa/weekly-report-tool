@@ -353,3 +353,60 @@ def test_gfa_get_adds_account_id(app_env, monkeypatch):
     assert seen['params'] == {'team_name': 'pd1', 'account_id': '123'} and seen['url'].endswith('/gfa-proxy/adAccounts')
     collectors.gfa_get('adAccounts', {'account_id': '9'}, session=S_())
     assert seen['params']['account_id'] == '9'               # 직접 넣으면 그 값 우선
+
+
+def test_gfa_native_collect(app_env, monkeypatch):
+    from app import collectors, db, settings
+    monkeypatch.setenv('GFA_REPORT_PATH', '')
+    settings.reload()
+    calls = []
+    perf_c = [{'campaignNo': 1, 'adSetNo': 11, 'creativeNo': 111, 'targetDate': '2026-11-02', 'impCount': 100,
+               'clickCount': 5, 'sales': 11000},
+              {'campaignNo': 1, 'adSetNo': 11, 'creativeNo': 999, 'targetDate': '2026-11-02', 'impCount': 10,
+               'clickCount': 1, 'sales': 1100}]
+    conv_c = [{'campaignNo': 1, 'adSetNo': 11, 'creativeNo': 111, 'targetDate': '2026-11-02', 'convType': 'PURCHASE',
+               'convCount': 2, 'convSales': 50000},
+              {'campaignNo': 1, 'adSetNo': 11, 'creativeNo': 111, 'targetDate': '2026-11-02', 'convType': 'CART',
+               'convCount': 9, 'convSales': 0},
+              {'campaignNo': 1, 'adSetNo': 11, 'creativeNo': 111, 'targetDate': '2026-11-03', 'convType': 'PURCHASE',
+               'convCount': 1, 'convSales': 7000}]
+    perf_a = [{'campaignNo': 2, 'assetGroupNo': 5, 'targetDate': '20261102', 'impCount': 50, 'clickCount': 2,
+               'sales': 2200}]
+
+    def fake_get(path, params=None, session=None):
+        calls.append((path, dict(params or {})))
+        p = params or {}
+        if '/performance/' not in path and path.endswith('/campaigns'):
+            return {'content': [] if p.get('deleteOnly') else [{'no': 1, 'name': '(Mars Pet) 스마트채널&피드'},
+                                                               {'no': 2, 'name': '(Mars Pet) ADVoost 쇼핑'}], 'last': True}
+        if '/performance/' not in path and path.endswith('/adSets'):
+            return {'content': [{'no': 11, 'name': '261023_브데_피드', 'campaignNo': 1}], 'last': True}
+        if '/performance/' not in path and path.endswith('/creatives'):
+            if p.get('page') == 0 and not p.get('deleteOnly'):
+                return {'content': [{'no': 111, 'name': 'tem_feed_1', 'adSetNo': 11}], 'last': False}
+            return {'content': [], 'last': True}
+        if '/conversion/past/creatives' in path:
+            return {'rows': conv_c[:2], 'next': 'T'} if 'next' not in p else {'rows': conv_c[2:]}
+        if '/conversion/past/assetGroups' in path:
+            return {'rows': []}
+        if '/past/creatives' in path:
+            return {'rows': perf_c}
+        if '/past/assetGroups' in path:
+            return {'rows': perf_a}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(collectors, 'gfa_get', fake_get)
+    n = collectors.collect_gfa(date(2026, 11, 1), date(2026, 11, 3))
+    assert n == 4
+    assert any(c[0] == 'adAccounts/123/performance/past/creatives' and c[1]['timeUnit'] == 'daily'
+               and c[1]['startDate'] == '2026-11-01' and c[1]['endDate'] == '2026-11-03' for c in calls)
+    rows = {(r['date'], r['creative_id'] or r['adgroup']): r for r in db.read_raw(['*'], date(2026, 11, 1), date(2026, 11, 3))}
+    r = rows[(date(2026, 11, 2), '111')]
+    assert (r['campaign'], r['adgroup'], r['creative']) == ('(Mars Pet) 스마트채널&피드', '261023_브데_피드', 'tem_feed_1')
+    assert (r['imps'], r['cost'], r['conv'], r['revenue']) == (100, 11000, 2, 50000)   # 장바구니 제외
+    assert rows[(date(2026, 11, 3), '111')]['conv'] == 1                               # 다음 페이지(next)까지 읽음
+    assert rows[(date(2026, 11, 2), '999')]['creative'] == '소재 999'                  # 이름 모르면 번호로
+    a = rows[(date(2026, 11, 2), '애셋그룹 5')]
+    assert a['campaign'] == '(Mars Pet) ADVoost 쇼핑' and a['cost'] == 2200
+    from app.rules import classify_gfa
+    assert classify_gfa(a['campaign'])[1] == 'ADVoost'

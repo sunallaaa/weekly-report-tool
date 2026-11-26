@@ -50,6 +50,8 @@ class Settings:
         self.gfa_report_path = env('GFA_REPORT_PATH')               # 예: adAccounts/{account}/performance
         self.gfa_report_params = env('GFA_REPORT_PARAMS', '{}')     # JSON, {since}/{until}/{account} 치환
         self.gfa_field_map = env('GFA_FIELD_MAP', '{}')             # JSON, 표준컬럼 → 응답 필드
+        # ↑ GFA_REPORT_PATH 를 비워 두면 네이버 공식 성과 경로(performance/past)로 자동 수집
+        self.gfa_conv_types = [t.upper() for t in env_list('GFA_CONV_TYPES')] or ['PURCHASE']   # 구매완료
 
         # 광고주 구분 (나중에 광고주 공유 시 권한 범위로 사용)
         self.advertiser = env('ADVERTISER_KEY', 'mars')
@@ -84,6 +86,10 @@ class Settings:
     @property
     def gfa_ready(self):
         return bool(self.gfa_key and self.gfa_team)
+
+    @property
+    def gfa_collect_ready(self):
+        return bool(self.gfa_ready and (self.gfa_report_path or self.gfa_account_id))
 
     @property
     def google_ready(self):
