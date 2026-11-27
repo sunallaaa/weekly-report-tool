@@ -582,3 +582,11 @@ def test_export_daily_matches_mars_daily_format(app_env, tmp_path):
     got = [r for r in openpyxl.load_workbook(p).active.iter_rows(min_row=2, values_only=True)]
     assert got[0][:5] == ('2026-11-20', 'GFA', '-', '(Mars Pet) ADVoost 쇼핑', None) and got[0][7] == 100.5
     assert got[1][:5] == ('2026-11-20', 'NaverBS', 'M', '1. M_마즈코리아_PET_브랜드검색', '1. 시저')
+
+
+def test_work_dir_falls_back_when_not_writable(app_env, monkeypatch):
+    from app import report_job, settings
+    monkeypatch.setenv('WORK_DIR', '/proc/no-permission/work')
+    settings.reload()
+    d = report_job.work_dir()
+    assert d.endswith('naver-dashboard-work') and os.access(d, os.W_OK)

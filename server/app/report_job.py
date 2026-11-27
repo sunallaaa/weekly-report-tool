@@ -103,6 +103,22 @@ def run_collect_job(since=None, until=None):
         raise
 
 
+def work_dir():
+    """쓸 수 있는 작업 폴더 — 지정 폴더에 권한이 없으면 임시 폴더로 바꾼다"""
+    import tempfile
+    d = S.settings.work_dir
+    try:
+        os.makedirs(d, exist_ok=True)
+        probe = os.path.join(d, '.write_test')
+        open(probe, 'w').close()
+        os.remove(probe)
+        return d
+    except OSError:
+        d = os.path.join(tempfile.gettempdir(), 'naver-dashboard-work')
+        os.makedirs(d, exist_ok=True)
+        return d
+
+
 def run_weekly_job(report_day=None, upload=True):
     """report_day: 작성일(기본 오늘). 데이터 기간 = 당월 1일 ~ 작성일 전일."""
     st = S.settings
@@ -115,10 +131,10 @@ def run_weekly_job(report_day=None, upload=True):
         res = collectors.run_collect(since, until)
         log.append('재수집 {}~{}: {}'.format(since, until, res['result']))
         rows = db.read_raw([st.advertiser], since, until)
-        os.makedirs(st.work_dir, exist_ok=True)
+        wd = work_dir()
         tag = report_day.strftime('%y%m%d')
-        daily = os.path.join(st.work_dir, 'Mars_Daily_자동_{}.xlsx'.format(tag))
-        result = os.path.join(st.work_dir, 'result_자동_{}.csv'.format(tag))
+        daily = os.path.join(wd, 'Mars_Daily_자동_{}.xlsx'.format(tag))
+        result = os.path.join(wd, 'result_자동_{}.csv'.format(tag))
         log.append('Mars_Daily {}행, result {}행'.format(export_daily(rows, daily), export_result(rows, result)))
         out['files'] = [daily, result]
         if upload and st.google_ready and st.raw_upload_folder_id:
@@ -129,7 +145,7 @@ def run_weekly_job(report_day=None, upload=True):
             log.append('로우업로드 폴더 업로드 완료')
         if st.pipeline_cmd:
             cmd = st.pipeline_cmd.format(daily=shlex.quote(daily), result=shlex.quote(result),
-                                         since=since, until=until, workdir=shlex.quote(st.work_dir))
+                                         since=since, until=until, workdir=shlex.quote(wd))
             p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3600)
             log.append('리포트 작성 종료코드 {}\n{}'.format(p.returncode, (p.stdout + p.stderr)[-3000:]))
             if p.returncode != 0:

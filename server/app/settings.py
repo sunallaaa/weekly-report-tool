@@ -66,7 +66,8 @@ class Settings:
 
         # 리포트 자동 작성
         self.marsrep_dir = env('MARSREP_DIR', '/app/marsrep')       # 데이터팀 패키지 (서버에만 둠, 깃 금지)
-        self.work_dir = env('WORK_DIR', './data/work')
+        # 작업 파일(로우·엑셀)은 컨테이너 임시 폴더에 만든 뒤 드라이브로 올린다 (서버 data 폴더는 쓰기 권한이 없을 수 있음)
+        self.work_dir = env('WORK_DIR', '/tmp/naver-dashboard-work')
         self.report_enabled = env('REPORT_ENABLED', '0') == '1'
         self.raw_upload_folder_id = env('RAW_UPLOAD_FOLDER_ID')
         # 서버에서 엑셀까지 작성할 때의 실행 명령 ({daily} {result} {since} {until} {workdir} 치환,
