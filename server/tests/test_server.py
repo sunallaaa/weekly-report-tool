@@ -590,3 +590,26 @@ def test_work_dir_falls_back_when_not_writable(app_env, monkeypatch):
     settings.reload()
     d = report_job.work_dir()
     assert d.endswith('naver-dashboard-work') and os.access(d, os.W_OK)
+
+
+def test_report_tables_weeks_and_products(app_env, monkeypatch):
+    from app import collectors, dashboard, db
+    monkeypatch.setattr(collectors, 'today', lambda: date(2026, 11, 27))
+    # 주차: 11/1(일)=1주차, 11/16~22=4주차, 11/23~29=5주차
+    f, l = date(2026, 11, 1), date(2026, 11, 30)
+    assert dashboard.week_of(date(2026, 11, 1), f, l) == (1, date(2026, 11, 1), date(2026, 11, 1))
+    assert dashboard.week_of(date(2026, 11, 18), f, l) == (4, date(2026, 11, 16), date(2026, 11, 22))
+    assert dashboard.week_of(date(2026, 11, 30), f, l)[0] == 6
+    rows = []
+    for d in (date(2026, 10, 15), date(2026, 11, 3), date(2026, 11, 18), date(2026, 11, 19)):
+        rows += [{'date': d, 'media': 'GFA', 'campaign': '(Mars Conf) ADVoost 쇼핑', 'adgroup': '', 'imps': 10, 'clicks': 1,
+                  'cost': 1100, 'conv': 1, 'revenue': 5000},
+                 {'date': d, 'media': 'GFA', 'campaign': '(Mars Pet) 스마트채널&피드', 'adgroup': '261023_브데_피드_알림',
+                  'imps': 20, 'clicks': 2, 'cost': 2200, 'conv': 2, 'revenue': 9000}]
+    db.replace_raw('mars', ['GFA'], date(2026, 10, 1), date(2026, 11, 30), rows)
+    r = dashboard.report_tables(['*'], '2026-11', True)
+    mo = {(x['period'], x['cat'], x['product']): x for x in r['monthly']}
+    assert round(mo[('2026-10', 'Conf', 'ADVoost')]['cost']) == 1000 and ('2026-11', 'Pet', '피드') in mo
+    wk = {(x['label'], x['product']): x for x in r['weekly']}
+    assert wk[('11월 4주차', 'ADVoost')]['imps'] == 20 and wk[('11월 4주차', 'ADVoost')]['range'] == '11/16~11/22'
+    assert wk[('11월 2주차', '피드')]['conv'] == 2 and {x['period'] for x in r['daily']} == {'2026-11-03', '2026-11-18', '2026-11-19'}

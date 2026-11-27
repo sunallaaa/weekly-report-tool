@@ -156,6 +156,17 @@ def api_dashboard(since: str = '', until: str = '', media: str = 'ALL', filter: 
     return dashboard.build(auth.advertisers_of(u), s, e, media, filter, bool(vat), bool(force))
 
 
+@app.get('/api/report-tables')
+def api_report_tables(month: str = '', vat: int = 1, u=Depends(auth.require_user)):
+    """리포트형 표: 월별(최근 6개월)·주차별·일자별 — 매체·카테고리·상품(GFA 채널 / BS 브랜드)별"""
+    month = month or collectors.today().strftime('%Y-%m')
+    try:
+        date.fromisoformat(month + '-01')
+    except ValueError:
+        raise HTTPException(400, '월 형식은 YYYY-MM 입니다.')
+    return dashboard.report_tables(auth.advertisers_of(u), month, bool(vat))
+
+
 @app.get('/api/bs-detail')
 def api_bs_detail(since: str, until: str, u=Depends(auth.require_user)):
     """브랜드검색 키워드·소재 성과 (브랜드 › 디바이스 › 키워드/소재). 광고비는 CPT 라 브랜드 단위 표에서만 계산."""

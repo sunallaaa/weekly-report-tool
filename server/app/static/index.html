@@ -27,6 +27,8 @@
   .path { font-size:11.5px; color:var(--sub); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cm { display:grid; grid-template-columns:1fr 1fr; gap:2px 10px; color:#4b5563; }
   .filters { padding:16px 20px; }
+  .rth { margin:18px 0 8px; font-size:14px; font-weight:800; } .rth:first-of-type { margin-top:4px; }
+  tr.rtp td { color:#4b5563; } tr.rtp td.l { padding-left:30px; }
 </style>
 </head>
 <body>
@@ -77,6 +79,15 @@
   <section class="tab on" id="tab-perf">
     <div class="cards" id="cards"></div>
     <div class="panel" id="budgetPanel" style="display:none"><h3>카테고리별 예산 소진 <span class="muted" id="budgetLbl"></span></h3><div class="bud" id="budget"></div></div>
+    <div class="panel" id="rtPanel">
+      <h3>리포트 형식 표 <span class="muted">(리포트와 같은 구분 · 상품 = GFA 채널 / 브랜드검색 브랜드 · ▸ 를 눌러 상품별 펼치기)</span>
+        <input type="month" id="rtMonth" style="margin-left:auto;font-size:13px;padding:6px 10px">
+      </h3>
+      <div class="muted" id="rtNote" style="margin:-6px 0 10px"></div>
+      <h4 class="rth">월별 토탈 <span class="muted">(최근 6개월)</span></h4><div class="tbl" id="rtMonthly"></div>
+      <h4 class="rth">주차별 토탈 <span class="muted" id="rtWeekLbl"></span></h4><div class="tbl" id="rtWeekly"></div>
+      <h4 class="rth">일자별 토탈</h4><div class="tbl" id="rtDaily" style="max-height:560px;overflow:auto"></div>
+    </div>
     <div class="panel"><h3 id="treeTitle">성과 상세 <span class="muted">(▸ 를 눌러 펼치기)</span></h3><div class="tbl" id="tree"></div></div>
     <div class="panel" id="channelPanel"><h3>GFA 채널별 <span class="muted">(스마트채널·피드 분리 · 리포트 기준)</span></h3><div class="tbl" id="tblChannel"></div></div>
     <div class="panel"><h3>일별 추이</h3><canvas id="chartDaily"></canvas></div>
@@ -278,6 +289,8 @@ function renderPerf() {
         '<div class="muted">' + n0(b.used) + ' / ' + n0(b.budget) + '원 · 소진 ' + p.toFixed(0) + '% (기간경과 ' + B.elapsed + '%)</div></div>';
     }).join('');
   } else { $('budgetPanel').style.display = 'none'; }
+  // 리포트 형식 표
+  loadReportTables();
   // 트리
   $('treeTitle').innerHTML = (state.media === 'BS' ? '브랜드검색 성과' : '성과 상세') + ' <span class="muted">(▸ 를 눌러 펼치기 · BS 는 캠페인 › 브랜드 › 디바이스)</span>';
   $('tree').innerHTML = tree(lv);
@@ -299,6 +312,46 @@ function renderPerf() {
     options: { responsive: true, interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } } });
 }
+// ── 리포트 형식 표 (월별 · 주차별 · 일자별) ──
+var RT = null, RT_KEY = '';
+function loadReportTables() {
+  var m = $('rtMonth').value || TODAY.slice(0, 7), key = m + '|' + ($('vat').checked ? 1 : 0);
+  if (RT_KEY === key && RT) return renderReportTables();
+  RT_KEY = key; $('rtNote').textContent = '불러오는 중…';
+  api('api/report-tables?' + new URLSearchParams({ month: m, vat: $('vat').checked ? 1 : 0 }).toString())
+    .then(function (r) { RT = r; renderReportTables(); })
+    .catch(function (e) { $('rtNote').textContent = e.message; });
+}
+function rtTable(list, labelOf, idp) {
+  var rs = list.filter(function (r) { return pass(r, true); });
+  if (!rs.length) return '<div class="muted">데이터가 없습니다.</div>';
+  var periods = uniq(rs.map(function (r) { return r.period; })).sort();
+  var h = '<table><tr><th class="l">기간 › 상품</th>' + HEAD + '</tr>';
+  periods.forEach(function (p, i) {
+    var pr = rs.filter(function (r) { return r.period === p; }), pid = idp + i;
+    h += '<tr class="lv0"><td class="l tg" data-t="' + pid + '">' + labelOf(p, pr[0]) + '</td>' + cells(sum(pr)) + '</tr>';
+    var prods = uniq(pr.map(function (r) { return r.media + '|' + r.product; }));
+    prods.sort(function (a, b) { return sum(pr.filter(function (r) { return r.media + '|' + r.product === b; })).cost - sum(pr.filter(function (r) { return r.media + '|' + r.product === a; })).cost; });
+    prods.forEach(function (k) {
+      var x = pr.filter(function (r) { return r.media + '|' + r.product === k; }), mk = k.split('|')[0];
+      var cats = uniq(x.map(function (r) { return r.cat; }));
+      h += '<tr class="rtp" data-p="' + pid + '" style="display:none"><td class="l">' + (state.media === 'ALL' ? chip(mk, MEDIA_NAME[mk]) : '') +
+        (state.cat === 'ALL' ? cats.map(function (c) { return chip(c); }).join('') : '') + esc(k.split('|').slice(1).join('|')) + '</td>' + cells(sum(x)) + '</tr>';
+    });
+  });
+  return h + '<tr class="tot"><td class="l">합계</td>' + cells(sum(rs)) + '</tr></table>';
+}
+function renderReportTables() {
+  if (!RT) return;
+  $('rtNote').textContent = RT.month + ' 기준 · 데이터 ~' + RT.until + ' · 광고비 ' + ($('vat').checked ? 'VAT 제외' : 'VAT 포함') + ' · 브랜드검색 광고비는 CPT 계약 일할';
+  $('rtWeekLbl').textContent = '(' + RT.month + ')';
+  $('rtMonthly').innerHTML = rtTable(RT.monthly, function (p) { return '<b>' + p.replace('-', '년 ') + '월</b>'; }, 'rm');
+  $('rtWeekly').innerHTML = rtTable(RT.weekly, function (p, r) { return '<b>' + esc(r.label) + '</b> <span class="muted">' + esc(r.range) + (r.partial ? ' · 일부' : '') + '</span>'; }, 'rw');
+  $('rtDaily').innerHTML = rtTable(RT.daily, function (p) { var d = new Date(p + 'T00:00:00Z'); return '<b>' + p.slice(5).replace('-', '/') + '</b> <span class="muted">' + '일월화수목금토'[d.getUTCDay()] + '</span>'; }, 'rd');
+  ['rtMonthly', 'rtWeekly', 'rtDaily'].forEach(function (id) { bindTree($(id)); });
+}
+$('rtMonth').onchange = loadReportTables;
+
 function tree(rs) {
   if (!rs.length) return '<div class="muted">데이터가 없습니다.</div>';
   var id = 0, order = ['GFA', 'BS', 'SA'], catOrder = ['Conf', 'Pet', '기타'];
@@ -496,6 +549,7 @@ TODAY = kst();
 $('asOf').textContent = TODAY.replace(/-/g, '.') + ' 기준';
 $('tSince').value = addDays(TODAY, -180); $('tUntil').value = addDays(TODAY, -1);
 $('since').value = addDays(TODAY, -14); $('until').value = TODAY;
+$('rtMonth').value = addDays(TODAY, -1).slice(0, 7);
 layout();
 $('logout').onclick = function (e) { e.preventDefault(); api('api/auth/logout', { method: 'POST' }).then(function () { location.href = 'login'; }); };
 api('api/me').then(function (m) {

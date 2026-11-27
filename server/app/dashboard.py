@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """대시보드 집계 — gas/Code.gs 의 apiDashboard 와 같은 결과 구조."""
 import time
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import select
 
@@ -187,3 +187,64 @@ def budget_status(advertisers, since, until, vat, contracts):
     days = (nxt - first).days
     return {'month': month, 'items': list(merged.values()), 'until': str(last),
             'elapsed': round(max(0, (last - first).days + 1) / days * 100)}
+
+
+def week_of(d, first, last):
+    """리포트 주차: 월~일 기준, 1일이 속한 주가 1주차. 반환 (번호, 시작, 끝) — 시작·끝은 그 달 안으로 자름"""
+    mon0 = first - timedelta(days=first.weekday())
+    n = (d - mon0).days // 7 + 1
+    s = mon0 + timedelta(days=(n - 1) * 7)
+    return n, max(s, first), min(s + timedelta(days=6), last)
+
+
+def product_of(r, contracts):
+    """상품(리포트 구분): GFA=채널, 브랜드검색=브랜드, 그 외=캠페인"""
+    if r['media'] == 'GFA':
+        c = classify_gfa(r['campaign'], r['adgroup'], r.get('creative'))
+        return c[1] if c else r['campaign']
+    if r['media'] == 'NaverBS':
+        return brand_of(r['adgroup'], contracts) or str(r['adgroup'])
+    return r['campaign']
+
+
+def report_tables(advertisers, month, vat=True, months_back=5):
+    """리포트형 표: 월별(최근 6개월) · 주차별(선택 월) · 일자별(선택 월), 매체·카테고리·상품별 합계"""
+    t = collectors.today()
+    first = date.fromisoformat(month + '-01')
+    nxt = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    last = min(nxt - timedelta(days=1), t - timedelta(days=1))
+    m0 = first
+    for _ in range(months_back):
+        m0 = (m0 - timedelta(days=1)).replace(day=1)
+    out = {'month': month, 'until': str(last), 'monthly': [], 'weekly': [], 'daily': []}
+    if last < m0:
+        return out
+    rows = db.read_raw(advertisers, m0, last)
+    if vat:
+        rows = vat_exclude(rows)
+    contracts = load_contracts(advertisers)
+    rows, _ = apply_bs_cpt(rows, contracts, m0, last)
+
+    def base(r):
+        return [media_key(r['media']), category_of(r['media'], r['campaign'], r['adgroup']), product_of(r, contracts)]
+
+    def put(key_fn, bucket, extra):
+        for g in group_by(rows, key_fn):
+            parts = g['key'].split('|')
+            out[bucket].append(dict(g, period=parts[0], media=parts[1], cat=parts[2], product=parts[3], **extra(parts[0])))
+
+    put(lambda r: '|'.join([r['date'].strftime('%Y-%m')] + base(r)), 'monthly', lambda p: {})
+    in_month = [r for r in rows if first <= r['date'] <= last]
+    wk = {}
+
+    def wkey(r):
+        n, s_, e_ = week_of(r['date'], first, nxt - timedelta(days=1))
+        wk[n] = (s_, min(e_, last))
+        return '|'.join(['{:02d}'.format(n)] + base(r))
+    saved, rows = rows, in_month
+    put(wkey, 'weekly', lambda p: {'label': '{}월 {}주차'.format(first.month, int(p)),
+                                   'range': '{}~{}'.format(wk[int(p)][0].strftime('%m/%d'), wk[int(p)][1].strftime('%m/%d')),
+                                   'partial': (wk[int(p)][1] - wk[int(p)][0]).days < 6})
+    put(lambda r: '|'.join([str(r['date'])] + base(r)), 'daily', lambda p: {})
+    rows = saved
+    return out
