@@ -14,6 +14,41 @@ MEDIA_LABEL = {'GFA': 'GFA (디스플레이)', 'NaverBS': '브랜드검색', 'Na
 BS_DEFAULT_BRANDS = ['그리니즈', '시저', '템테이션', '쉬바', '위스카스', '뉴트로']
 
 
+PET_BRANDS = ['그리니즈', '시저', '템테이션', '쉬바', '위스카스', '뉴트로', '페디그리', '로얄캐닌', '아이엠스']
+MEDIA_KEY = {'GFA': 'GFA', 'NaverBS': 'BS'}      # 대시보드 매체 구분 (그 외 검색광고는 'SA')
+
+
+def media_key(media):
+    return MEDIA_KEY.get(media, 'SA')
+
+
+def category_of(media, camp, group=''):
+    """Conf(스낵) / Pet(반려동물) / 기타 — GFA 는 캠페인 머리말, 검색광고는 캠페인명·브랜드로 판단"""
+    camp = str(camp or '')
+    up = camp.upper()
+    if media == 'GFA':
+        if camp.startswith('(Mars Conf)'):
+            return 'Conf'
+        if camp.startswith('(Mars Pet)'):
+            return 'Pet'
+    if 'CONF' in up or '스낵' in camp:
+        return 'Conf'
+    if 'PET' in up or any(b in str(group or '') for b in PET_BRANDS):
+        return 'Pet'
+    return '기타'
+
+
+def device_of(group):
+    """광고그룹 이름의 _PC / _MO 꼬리표 → PC / MO / 전체"""
+    toks = [t.strip().upper() for t in str(group or '').replace('-', '_').replace(' ', '_').split('_') if t.strip()]
+    for t in reversed(toks):
+        if t in ('PC',):
+            return 'PC'
+        if t in ('MO', 'MOBILE', 'M'):
+            return 'MO'
+    return '전체'
+
+
 def classify_gfa(camp, group='', creative=''):
     """(시트, 채널) 또는 None."""
     camp = str(camp or '')

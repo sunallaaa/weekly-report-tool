@@ -471,3 +471,96 @@ def test_trend_estimate(app_env, monkeypatch):
     # 키워드도구 없이도 상대지표는 나온다
     r2 = trend.build(groups, date(2026, 11, 2), date(2026, 11, 26), 'week', '', today, None)
     assert r2['estimate'] is False and r2['results'][0]['data'][0]['estimate'] is None
+
+
+def test_category_device_rules():
+    from app.rules import category_of, device_of, media_key
+    assert category_of('GFA', '(Mars Conf) ADVoost 쇼핑') == 'Conf' and category_of('GFA', '(Mars Pet) NDA') == 'Pet'
+    assert category_of('NaverBS', 'PET_브랜드검색', '시저_MO') == 'Pet' and category_of('NaverBS', '브랜드검색', '쉬바_PC') == 'Pet'
+    assert category_of('NaverBS', 'CONF_브랜드검색', '스니커즈_MO') == 'Conf' and category_of('NaverSA', '파워링크', 'g') == '기타'
+    assert (device_of('시저_MO'), device_of('템테이션 PC'), device_of('쉬바')) == ('MO', 'PC', '전체')
+    assert (media_key('GFA'), media_key('NaverBS'), media_key('NaverSA')) == ('GFA', 'BS', 'SA')
+
+
+def test_dashboard_v2_and_bs_detail(app_env, monkeypatch):
+    from app import collectors, db
+    c = app_env
+    login(c, 'boss@adef.co.kr', monkeypatch)
+    monkeypatch.setattr(collectors, 'today', lambda: date(2026, 11, 20))
+    d1 = date(2026, 11, 2)
+    db.replace_raw('mars', ['GFA', 'NaverBS'], d1, d1, [
+        {'date': d1, 'media': 'GFA', 'campaign': '(Mars Conf) 쇼핑고객확장', 'adgroup': 'g1', 'creative': 'cr1',
+         'creative_id': '11', 'imps': 100, 'clicks': 10, 'cost': 11000, 'conv': 1, 'revenue': 50000},
+        {'date': d1, 'media': 'NaverBS', 'campaign': 'PET_브랜드검색', 'adgroup': '시저_MO', 'imps': 50, 'clicks': 5,
+         'cost': 0, 'conv': 2, 'revenue': 30000},
+        {'date': d1, 'media': 'NaverBS', 'campaign': 'PET_브랜드검색', 'adgroup': '시저_PC', 'imps': 20, 'clicks': 2,
+         'cost': 0, 'conv': 1, 'revenue': 10000}])
+    db.save_creative_meta('mars', 'GFA', [{'creative_id': '11', 'name': 'cr1', 'image_url': 'https://img/x.jpg'}])
+    c.post('/api/admin/contracts', json={'brand': '시저', 'start': '2026-11-01', 'end': '2026-11-30', 'amount': 300000})
+    d = c.get('/api/dashboard', params={'since': '2026-11-02', 'until': '2026-11-02'}).json()
+    lv = {(x['media'], x['cat'], x['group'], x['device']): x for x in d['leaves']}
+    assert ('GFA', 'Conf', 'g1', '') in lv and round(lv[('GFA', 'Conf', 'g1', '')]['cost']) == 10000   # VAT 제외
+    assert {k[3] for k in lv if k[0] == 'BS'} == {'MO', 'PC'} and all(k[2] == '시저' for k in lv if k[0] == 'BS')
+    assert round(sum(x['cost'] for x in d['leaves'] if x['media'] == 'BS')) == 10000                   # CPT 하루치 1번
+    assert d['gfaCreatives'][0]['image'] == 'https://img/x.jpg' and d['gfaCreatives'][0]['cat'] == 'Conf'
+    assert {(x['media'], x['cat']) for x in d['dailyBy']} == {('GFA', 'Conf'), ('BS', 'Pet')}
+    db.replace_bs_detail('mars', d1, d1, [
+        {'date': d1, 'campaign': 'PET_브랜드검색', 'adgroup': '시저_MO', 'level': 'keyword', 'item_id': 'k1',
+         'item_name': '시저', 'imps': 30, 'clicks': 3, 'conv': 1, 'revenue': 10000},
+        {'date': d1, 'campaign': 'PET_브랜드검색', 'adgroup': '시저_PC', 'level': 'ad', 'item_id': 'a1',
+         'item_name': '시저 PC 소재', 'image_url': 'https://img/a.png', 'imps': 20, 'clicks': 2, 'conv': 0, 'revenue': 0}])
+    r = c.get('/api/bs-detail', params={'since': '2026-11-01', 'until': '2026-11-03'}).json()
+    got = {(i['brand'], i['device'], i['level'], i['name']) for i in r['items']}
+    assert got == {('시저', 'MO', 'keyword', '시저'), ('시저', 'PC', 'ad', '시저 PC 소재')}
+
+
+def test_fetch_bs_detail():
+    from app.sa_client import fetch_bs_detail
+    tsv = ("20261102\tcus\tc1\tg1\tk1\t-\tbiz\tm\tM\t1\tpurchase\t2\t20000\n"
+           "20261102\tcus\tc1\tg1\t-\ta1\tbiz\tm\tM\t2\tpurchase\t1\t5000\n"
+           "20261102\tcus\tc1\tg1\tk1\t-\tbiz\tm\tM\t1\tadd_to_cart\t9\t0\n")
+
+    class C:
+        def list_campaigns(self):
+            return [{'nccCampaignId': 'c1', 'name': 'PET_브랜드검색', 'campaignTp': 'BRAND_SEARCH'},
+                    {'nccCampaignId': 'c2', 'name': '파워링크', 'campaignTp': 'WEB_SITE'}]
+
+        def list_adgroups(self, cid):
+            assert cid == 'c1'
+            return [{'nccAdgroupId': 'g1', 'name': '시저_MO'}]
+
+        def list_keywords(self, gid):
+            return [{'nccKeywordId': 'k1', 'keyword': '시저'}]
+
+        def list_ads(self, gid):
+            return [{'nccAdId': 'a1', 'type': 'BRAND_SEARCH_AD',
+                     'ad': {'headline': '시저 메인', 'image': {'url': 'https://img/a.png'}}}]
+
+        def stats(self, ids, s, u):
+            return {'k1': {'impCnt': 100, 'clkCnt': 10}, 'a1': {'impCnt': 80, 'clkCnt': 8}}
+
+    rows = fetch_bs_detail(C(), date(2026, 11, 2), date(2026, 11, 2), {date(2026, 11, 2): tsv})
+    by = {r['item_id']: r for r in rows}
+    assert (by['k1']['item_name'], by['k1']['conv'], by['k1']['revenue']) == ('시저', 2, 20000)   # 장바구니 제외
+    assert (by['a1']['item_name'], by['a1']['image_url'], by['a1']['conv']) == ('시저 메인', 'https://img/a.png', 1)
+
+
+def test_budget_status(app_env, monkeypatch):
+    from app import collectors, dashboard, db, google, settings
+    for k in ('GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REFRESH_TOKEN', 'BUDGET_SHEET_ID'):
+        monkeypatch.setenv(k, 'x')
+    settings.reload()
+    dashboard._budget_cache.clear()
+    monkeypatch.setattr(collectors, 'today', lambda: date(2026, 11, 11))
+    monkeypatch.setattr(google, 'monthly_budgets', lambda m: [
+        {'sheet': 'NAVER GFA_Conf', 'name': 'ADVoost', 'budget': 1000000, 'memo': ''},
+        {'sheet': 'NAVER GFA_Conf', 'name': '쇼고확', 'budget': 500000, 'memo': ''},
+        {'sheet': 'NAVER BS_Pet', 'name': '브랜드검색', 'budget': 900000, 'memo': ''}])
+    d1 = date(2026, 11, 3)
+    db.replace_raw('mars', ['GFA'], d1, d1, [{'date': d1, 'media': 'GFA', 'campaign': '(Mars Conf) ADVoost 쇼핑',
+                                             'adgroup': 'a', 'imps': 1, 'clicks': 1, 'cost': 110000, 'conv': 0, 'revenue': 0}])
+    b = dashboard.budget_status(['*'], date(2026, 11, 1), date(2026, 11, 11), True, [])
+    it = {(x['media'], x['cat']): x for x in b['items']}
+    assert it[('GFA', 'Conf')]['budget'] == 1500000 and it[('GFA', 'Conf')]['used'] == 100000
+    assert it[('BS', 'Pet')]['budget'] == 900000 and b['elapsed'] == round(10 / 30 * 100)
+    assert dashboard.budget_status(['*'], date(2026, 10, 25), date(2026, 11, 2), True, []) is None   # 두 달에 걸치면 없음

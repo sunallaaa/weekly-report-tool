@@ -87,6 +87,35 @@ jobs = Table(
     mysql_charset='utf8mb4',
 )
 
+# GFA 소재 정보 (이미지 주소) — 소재ID 기준
+creative_meta = Table(
+    'creative_meta', meta,
+    Column('advertiser', String(40), primary_key=True),
+    Column('media', String(20), primary_key=True),
+    Column('creative_id', String(64), primary_key=True),
+    Column('name', String(255), default=''),
+    Column('image_url', String(1000), default=''),
+    Column('updated_at', DateTime, default=datetime.utcnow),
+    mysql_charset='utf8mb4',
+)
+
+# 브랜드검색 키워드·소재 단위 일별 성과 (광고비는 CPT 라 브랜드 단위로만 계산 → 여기엔 없음)
+bs_detail = Table(
+    'bs_detail', meta,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('advertiser', String(40), nullable=False, default='mars'),
+    Column('date', Date, nullable=False, index=True),
+    Column('campaign', String(255), default=''),
+    Column('adgroup', String(255), default=''),
+    Column('level', String(10), default=''),            # keyword / ad
+    Column('item_id', String(64), default=''),
+    Column('item_name', String(500), default=''),
+    Column('image_url', String(1000), default=''),
+    Column('imps', Float, default=0), Column('clicks', Float, default=0),
+    Column('conv', Float, default=0), Column('revenue', Float, default=0),
+    mysql_charset='utf8mb4',
+)
+
 _engine = None
 
 
@@ -152,3 +181,57 @@ def read_raw(advertisers, since, until):
 def log_audit(actor, action, detail=''):
     with engine().begin() as c:
         c.execute(audit.insert().values(actor=actor, action=action, detail=detail))
+
+
+def save_creative_meta(advertiser, media, items):
+    """items: [{'creative_id','name','image_url'}] — 같은 소재ID는 새 값으로 교체"""
+    items = [i for i in items if i.get('creative_id')]
+    if not items:
+        return 0
+    ids = list({i['creative_id'] for i in items})
+    with engine().begin() as c:
+        for k in range(0, len(ids), 500):
+            c.execute(delete(creative_meta).where(creative_meta.c.advertiser == advertiser,
+                                                  creative_meta.c.media == media,
+                                                  creative_meta.c.creative_id.in_(ids[k:k + 500])))
+        seen, now = set(), datetime.utcnow()
+        rows = []
+        for i in items:
+            if i['creative_id'] in seen:
+                continue
+            seen.add(i['creative_id'])
+            rows.append({'advertiser': advertiser, 'media': media, 'creative_id': i['creative_id'],
+                         'name': (i.get('name') or '')[:255], 'image_url': (i.get('image_url') or '')[:1000],
+                         'updated_at': now})
+        c.execute(creative_meta.insert(), rows)
+    return len(items)
+
+
+def read_creative_meta(advertisers, media='GFA'):
+    q = select(creative_meta).where(creative_meta.c.media == media)
+    if advertisers != ['*']:
+        q = q.where(creative_meta.c.advertiser.in_(advertisers))
+    with engine().connect() as c:
+        return {r.creative_id: {'name': r.name, 'image': r.image_url} for r in c.execute(q)}
+
+
+BS_KEYS = ('date', 'campaign', 'adgroup', 'level', 'item_id', 'item_name', 'image_url', 'imps', 'clicks', 'conv',
+           'revenue')
+
+
+def replace_bs_detail(advertiser, since, until, rows):
+    with engine().begin() as c:
+        c.execute(delete(bs_detail).where(bs_detail.c.advertiser == advertiser,
+                                          bs_detail.c.date >= since, bs_detail.c.date <= until))
+        if rows:
+            c.execute(bs_detail.insert(), [dict({k: r.get(k, 0 if k in ('imps', 'clicks', 'conv', 'revenue') else '')
+                                                 for k in BS_KEYS}, advertiser=advertiser) for r in rows])
+    return len(rows)
+
+
+def read_bs_detail(advertisers, since, until):
+    q = select(bs_detail).where(bs_detail.c.date >= since, bs_detail.c.date <= until)
+    if advertisers != ['*']:
+        q = q.where(bs_detail.c.advertiser.in_(advertisers))
+    with engine().connect() as c:
+        return [dict(r._mapping) for r in c.execute(q)]

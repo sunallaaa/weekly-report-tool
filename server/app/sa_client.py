@@ -147,6 +147,12 @@ class SearchAdClient:
         params = {'nccCampaignId': campaign_id} if campaign_id else None
         return self.get('/ncc/adgroups', params=params) or []
 
+    def list_keywords(self, adgroup_id):
+        return self.get('/ncc/keywords', params={'nccAdgroupId': adgroup_id}) or []
+
+    def list_ads(self, adgroup_id):
+        return self.get('/ncc/ads', params={'nccAdgroupId': adgroup_id}) or []
+
     # ── 통계 ─────────────────────────────────────────────
     def stats(self, ids, since, until):
         """ids 목록의 [since~until] 합계 통계. 반환: {id: {field: value}}"""
@@ -220,7 +226,8 @@ def parse_conversion_tsv(text):
         f = line.rstrip('\r').split('\t')
         if len(f) < 8 or not f[0][:1].isdigit():
             continue   # 머리글/빈 줄 건너뜀
-        out.append({'date': f[0], 'campaign_id': f[2], 'adgroup_id': f[3], 'method': f[-4].strip(),
+        out.append({'date': f[0], 'campaign_id': f[2], 'adgroup_id': f[3], 'keyword_id': f[4].strip(),
+                    'ad_id': f[5].strip(), 'method': f[-4].strip(),
                     'type': f[-3].strip().lower(), 'count': _num(f[-2]), 'sales': _num(f[-1])})
     return out
 
@@ -239,6 +246,89 @@ def conversion_by_group(tsv_text, types=('purchase',), methods=()):
         a[0] += r['count']
         a[1] += r['sales']
     return {k: tuple(v) for k, v in agg.items()}
+
+
+def _ad_name_image(ad):
+    """소재(ad) 응답에서 보여줄 이름과 이미지 주소를 찾는다 (소재 유형마다 필드가 달라 넓게 찾음)"""
+    body = ad.get('ad') if isinstance(ad.get('ad'), dict) else {}
+    name = ''
+    for k in ('headline', 'title', 'subject', 'name', 'description'):
+        v = body.get(k)
+        if isinstance(v, str) and v.strip():
+            name = v.strip()
+            break
+    img = ''
+
+    def walk(x):
+        nonlocal img
+        if img:
+            return
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if isinstance(v, str) and v.startswith('http') and (
+                        'image' in k.lower() or 'img' in k.lower() or 'thumb' in k.lower()
+                        or v.lower().split('?')[0].endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))):
+                    img = v
+                    return
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(body)
+    return name or '{} {}'.format(ad.get('type') or '소재', ad.get('nccAdId') or ''), img
+
+
+def fetch_bs_detail(client, since, until, conv_tsv=None, types=('purchase',), methods=(), notes=None):
+    """브랜드검색 키워드·소재 단위 일별 성과. conv_tsv: {날짜: 전환상세 TSV} (구매완료만 합산)"""
+    notes = notes if notes is not None else []
+    camps = {c['nccCampaignId']: c for c in client.list_campaigns()
+             if c.get('nccCampaignId') and media_of(c) == 'NaverBS'}
+    items = {}   # id → (level, name, image, campaign, adgroup)
+    for cid, c in camps.items():
+        for g in client.list_adgroups(cid):
+            gid = g.get('nccAdgroupId')
+            if not gid:
+                continue
+            try:
+                for k in client.list_keywords(gid):
+                    if k.get('nccKeywordId'):
+                        items[k['nccKeywordId']] = ('keyword', k.get('keyword') or '', '', c.get('name', ''), g.get('name', ''))
+            except Exception as e:
+                notes.append('브랜드검색 키워드 목록 실패({}): {}'.format(g.get('name'), str(e)[:80]))
+            try:
+                for a in client.list_ads(gid):
+                    if a.get('nccAdId'):
+                        nm, img = _ad_name_image(a)
+                        items[a['nccAdId']] = ('ad', nm, img, c.get('name', ''), g.get('name', ''))
+            except Exception as e:
+                notes.append('브랜드검색 소재 목록 실패({}): {}'.format(g.get('name'), str(e)[:80]))
+    if not items:
+        return []
+    types = {t.lower() for t in types if t}
+    rows = []
+    for d in daterange(since, until):
+        st = client.stats(items.keys(), d, d)
+        conv = {}
+        tsv = (conv_tsv or {}).get(d)
+        if isinstance(tsv, str):
+            for r in parse_conversion_tsv(tsv):
+                if (types and r['type'] not in types) or (methods and r['method'] not in methods):
+                    continue
+                for key in (r['keyword_id'], r['ad_id']):
+                    if key in items:
+                        a = conv.setdefault(key, [0.0, 0.0])
+                        a[0] += r['count']
+                        a[1] += r['sales']
+        for iid, (level, name, img, camp, grp) in items.items():
+            s = st.get(iid, {})
+            imps, clk = _num(s.get('impCnt')), _num(s.get('clkCnt'))
+            cv, rv = conv.get(iid, (0.0, 0.0))
+            if not (imps or clk or cv or rv):
+                continue
+            rows.append({'date': d, 'campaign': camp, 'adgroup': grp, 'level': level, 'item_id': iid,
+                         'item_name': name[:500], 'image_url': img[:1000], 'imps': imps, 'clicks': clk,
+                         'conv': cv, 'revenue': rv})
+    return rows
 
 
 def fetch_daily_raw_rows(client, since, until, campaign_filter=None, progress=None, conv_override=None):

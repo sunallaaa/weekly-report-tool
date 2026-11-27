@@ -13,7 +13,8 @@ import requests
 from . import db
 from . import settings as S
 from .rules import SA_MEDIA, daterange
-from .sa_client import SearchAdClient, conversion_by_group, fetch_daily_raw_rows, parse_conversion_tsv
+from .sa_client import (SearchAdClient, conversion_by_group, fetch_bs_detail, fetch_daily_raw_rows,
+                        parse_conversion_tsv)
 
 KST = timezone(timedelta(hours=9))
 
@@ -31,16 +32,21 @@ def sa_client():
 SA_NOTES = []   # 마지막 수집에서 생긴 안내(보고서 실패로 전체전환을 쓴 날 등)
 
 
-def _purchase_override(client, since, until):
-    """구매완료만 쓰도록 날짜별 {그룹ID: (구매수, 구매매출)} 을 미리 받아 둔다.
-    보고서가 실패한 날은 None → 그날만 전체전환(/stats)으로 두고 안내에 남긴다."""
-    st = S.settings
-    if st.sa_conv_source != 'report':
+def _conv_reports(client, since, until):
+    """전환상세 보고서 {날짜: TSV 또는 오류}. 전체전환 기준(stats)이면 None."""
+    if S.settings.sa_conv_source != 'report':
         return None
     try:
-        tsv = client.stat_reports_tsv('AD_CONVERSION_DETAIL', list(daterange(since, until)))
+        return client.stat_reports_tsv('AD_CONVERSION_DETAIL', list(daterange(since, until)))
     except Exception as e:
         SA_NOTES.append('전환보고서 요청 실패 → 전체전환 사용: {}'.format(str(e)[:150]))
+        return None
+
+
+def _purchase_override(tsv):
+    """구매완료만 쓰도록 날짜별 {그룹ID: (구매수, 구매매출)}. 보고서 실패한 날은 None → 그날만 전체전환."""
+    st = S.settings
+    if tsv is None:
         return None
 
     def conv(day):
@@ -52,10 +58,12 @@ def _purchase_override(client, since, until):
     return conv
 
 
-def sa_rows(since, until, client=None):
+def sa_rows(since, until, client=None, tsv=None, fetch_tsv=True):
     client = client or sa_client()
-    del SA_NOTES[:]
-    rows = fetch_daily_raw_rows(client, since, until, conv_override=_purchase_override(client, since, until))
+    if fetch_tsv:
+        del SA_NOTES[:]
+        tsv = _conv_reports(client, since, until)
+    rows = fetch_daily_raw_rows(client, since, until, conv_override=_purchase_override(tsv))
     return [{'date': r['Date'], 'media': r['Media'], 'device': r.get('Device') or 'ALL',
              'campaign': r['캠페인'], 'adgroup': r['그룹'], 'creative': '', 'creative_id': '',
              'imps': r['노출'], 'clicks': r['클릭'], 'cost': r['광고비'], 'conv': r['구매완료수'],
@@ -63,8 +71,20 @@ def sa_rows(since, until, client=None):
 
 
 def collect_sa(since, until, client=None):
-    rows = sa_rows(since, until, client)
-    return db.replace_raw(S.settings.advertiser, SA_MEDIA, since, until, rows)
+    st = S.settings
+    client = client or sa_client()
+    del SA_NOTES[:]
+    tsv = _conv_reports(client, since, until)
+    rows = sa_rows(since, until, client, tsv=tsv, fetch_tsv=False)
+    n = db.replace_raw(st.advertiser, SA_MEDIA, since, until, rows)
+    # 브랜드검색 키워드·소재 단위 (실패해도 기본 수집은 유지)
+    try:
+        detail = fetch_bs_detail(client, since, until, tsv if isinstance(tsv, dict) else None,
+                                 st.sa_conv_types, st.sa_conv_methods, SA_NOTES)
+        db.replace_bs_detail(st.advertiser, since, until, detail)
+    except Exception as e:
+        SA_NOTES.append('브랜드검색 키워드·소재 수집 실패: {}'.format(str(e)[:150]))
+    return n
 
 
 def sa_conversion_breakdown(since, until, client=None):
@@ -261,6 +281,8 @@ def gfa_names(acc, session=None):
                                                     g.get('campaignName') or '')
             for c in _gfa_list(base + '/creatives', extra, session):
                 names['creative'][str(c.get('no'))] = (c.get('name') or '', str(c.get('adSetNo') or ''))
+                img = c.get('image') if isinstance(c.get('image'), dict) else {}
+                names.setdefault('image', {})[str(c.get('no'))] = img.get('imageUrl') or ''
         except GfaError as e:
             if not extra:
                 raise
@@ -283,6 +305,10 @@ def gfa_native_rows(since, until, session=None):
     acc = st.gfa_account_id
     base = 'adAccounts/{}/performance'.format(acc)
     names = gfa_names(acc, session)
+    try:
+        save_gfa_images(names)
+    except Exception as e:
+        GFA_NOTES.append('소재 이미지 저장 실패: {}'.format(str(e)[:100]))
     agg = {}
 
     def key(r, level):
@@ -343,6 +369,13 @@ def gfa_native_rows(since, until, session=None):
     return rows
 
 
+def save_gfa_images(names):
+    imgs = names.get('image') or {}
+    db.save_creative_meta(S.settings.advertiser, 'GFA', [
+        {'creative_id': cid, 'name': names['creative'].get(cid, ('', ''))[0], 'image_url': url}
+        for cid, url in imgs.items()])
+
+
 def collect_gfa(since, until, session=None):
     """반환: 저장 행 수. GFA_REPORT_PATH 가 비어 있으면 네이버 공식 경로로 수집한다."""
     st = S.settings
@@ -352,6 +385,7 @@ def collect_gfa(since, until, session=None):
             raise GfaError('.env 에 GFA_AD_ACCOUNT_NO(광고계정 번호)가 필요합니다.')
         rows = gfa_native_rows(since, until, session)
         return db.replace_raw(st.advertiser, ['GFA'], since, until, rows)
+
     rows = []
     for d in daterange(since, until):
         path = st.gfa_report_path.replace('{account}', quote(st.gfa_account_id or ''))

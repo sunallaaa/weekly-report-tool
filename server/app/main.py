@@ -151,6 +151,33 @@ def api_dashboard(since: str = '', until: str = '', media: str = 'ALL', filter: 
     return dashboard.build(auth.advertisers_of(u), s, e, media, filter, bool(vat), bool(force))
 
 
+@app.get('/api/bs-detail')
+def api_bs_detail(since: str, until: str, u=Depends(auth.require_user)):
+    """브랜드검색 키워드·소재 성과 (브랜드 › 디바이스 › 키워드/소재). 광고비는 CPT 라 브랜드 단위 표에서만 계산."""
+    from .rules import brand_of, category_of, device_of
+    s, e = _d(since, None), _d(until, None)
+    if not (s and e and e >= s and (e - s).days <= 400):
+        raise HTTPException(400, '기간을 확인해 주세요 (최대 400일).')
+    advs = auth.advertisers_of(u)
+    contracts = dashboard.load_contracts(advs)
+    agg = {}
+    for r in db.read_bs_detail(advs, s, e):
+        brand = brand_of(r['adgroup'], contracts) or str(r['adgroup']).split('_')[0]
+        k = (category_of('NaverBS', r['campaign'], r['adgroup']), r['campaign'], brand, device_of(r['adgroup']),
+             r['level'], r['item_id'])
+        a = agg.setdefault(k, {'name': r['item_name'], 'image': r['image_url'], 'imps': 0, 'clicks': 0, 'cost': 0,
+                               'conv': 0, 'revenue': 0})
+        for f in ('imps', 'clicks', 'conv', 'revenue'):
+            a[f] += float(r[f] or 0)
+        if r['image_url']:
+            a['image'] = r['image_url']
+    from .rules import kpi
+    items = [dict(kpi(v), cat=k[0], campaign=k[1], brand=k[2], device=k[3], level=k[4], id=k[5], name=v['name'],
+                  image=v['image']) for k, v in agg.items()]
+    items.sort(key=lambda x: -x['imps'])
+    return {'since': str(s), 'until': str(e), 'items': items}
+
+
 class TrendIn(BaseModel):
     startDate: str
     endDate: str
