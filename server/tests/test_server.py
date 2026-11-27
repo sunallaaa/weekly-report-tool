@@ -479,6 +479,8 @@ def test_category_device_rules():
     assert category_of('NaverBS', 'PET_브랜드검색', '시저_MO') == 'Pet' and category_of('NaverBS', '브랜드검색', '쉬바_PC') == 'Pet'
     assert category_of('NaverBS', 'CONF_브랜드검색', '스니커즈_MO') == 'Conf' and category_of('NaverSA', '파워링크', 'g') == '기타'
     assert (device_of('시저_MO'), device_of('템테이션 PC'), device_of('쉬바')) == ('MO', 'PC', '전체')
+    assert device_of('1. 시저', '1. M_마즈코리아_PET_브랜드검색') == 'MO' and device_of('2. 그리니즈', 'P_마즈코리아_PET_브랜드검색') == 'PC'
+    assert category_of('NaverBS', '1. M_마즈코리아_PET_브랜드검색', '1. 시저') == 'Pet'
     assert (media_key('GFA'), media_key('NaverBS'), media_key('NaverSA')) == ('GFA', 'BS', 'SA')
 
 

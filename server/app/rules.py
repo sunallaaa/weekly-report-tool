@@ -5,6 +5,7 @@
 - 브랜드검색 광고비: CPT 계약 — 계약 기간 동안 노출 여부와 무관하게 매일 (계약금액 / 계약일수)
 - GFA 광고비는 VAT 포함 → 리포트에서는 ÷1.1
 """
+import re
 from datetime import date, timedelta
 
 GFA_VAT_DIVISOR = 1.1
@@ -38,11 +39,17 @@ def category_of(media, camp, group=''):
     return '기타'
 
 
-def device_of(group):
-    """광고그룹 이름의 _PC / _MO 꼬리표 → PC / MO / 전체"""
-    toks = [t.strip().upper() for t in str(group or '').replace('-', '_').replace(' ', '_').split('_') if t.strip()]
-    for t in reversed(toks):
-        if t in ('PC',):
+def device_of(group, campaign=''):
+    """PC / MO / 전체 — 광고그룹 이름의 PC·MO 꼬리표, 없으면 캠페인 이름의 머리말(예: '1. M_마즈코리아_…' → MO, 'P_' → PC)"""
+    def toks(x):
+        return [t.strip().upper() for t in re.split(r'[\s_\-.()\[\]]+', str(x or '')) if t.strip()]
+    for t in reversed(toks(group)):
+        if t in ('PC', 'P'):
+            return 'PC'
+        if t in ('MO', 'MOBILE', 'M'):
+            return 'MO'
+    for t in toks(campaign):
+        if t in ('PC', 'P'):
             return 'PC'
         if t in ('MO', 'MOBILE', 'M'):
             return 'MO'

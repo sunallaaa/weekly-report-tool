@@ -275,7 +275,7 @@ def _ad_name_image(ad):
             for v in x:
                 walk(v)
     walk(body)
-    return name or '{} {}'.format(ad.get('type') or '소재', ad.get('nccAdId') or ''), img
+    return name or '소재 …{}'.format(str(ad.get('nccAdId') or '')[-6:]), img
 
 
 def fetch_bs_detail(client, since, until, conv_tsv=None, types=('purchase',), methods=(), notes=None):

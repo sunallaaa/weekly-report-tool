@@ -163,7 +163,7 @@ def api_bs_detail(since: str, until: str, u=Depends(auth.require_user)):
     agg = {}
     for r in db.read_bs_detail(advs, s, e):
         brand = brand_of(r['adgroup'], contracts) or str(r['adgroup']).split('_')[0]
-        k = (category_of('NaverBS', r['campaign'], r['adgroup']), r['campaign'], brand, device_of(r['adgroup']),
+        k = (category_of('NaverBS', r['campaign'], r['adgroup']), r['campaign'], brand, device_of(r['adgroup'], r['campaign']),
              r['level'], r['item_id'])
         a = agg.setdefault(k, {'name': r['item_name'], 'image': r['image_url'], 'imps': 0, 'clicks': 0, 'cost': 0,
                                'conv': 0, 'revenue': 0})

@@ -89,7 +89,7 @@ def build(advertisers, since, until, media='ALL', name_filter='', vat=True, forc
         m, c = mk(r)
         if m == 'BS':
             b = brand_of(r['adgroup'], contracts) or str(r['adgroup']).split('_')[0]
-            return '|'.join([m, c, r['campaign'], b, device_of(r['adgroup'])])
+            return '|'.join([m, c, r['campaign'], b, device_of(r['adgroup'], r['campaign'])])
         return '|'.join([m, c, r['campaign'], r['adgroup'], ''])
 
     leaves = []
