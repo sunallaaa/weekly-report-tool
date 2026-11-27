@@ -20,6 +20,7 @@ import openpyxl
 from sqlalchemy import select, update
 
 from . import collectors, db, google
+from .rules import device_of
 from . import settings as S
 
 DAILY_COLS = ['Date', 'Media', 'Device', '캠페인', '그룹', '노출', '클릭', '광고비', '구매완료수', '매출액']
@@ -38,7 +39,13 @@ def export_daily(rows, path):
     for r in rows:
         if r['media'] not in ('GFA', 'NaverBS'):
             continue
-        k = (r['date'], r['media'], r['device'] or 'ALL', r['campaign'], r['adgroup'])
+        # 기존 Mars_Daily 표기에 맞춤: GFA Device '-', 브랜드검색 'M'/'P', ADVoost(애셋그룹) 그룹명 빈칸
+        if r['media'] == 'GFA':
+            dev = '-'
+        else:
+            dev = {'MO': 'M', 'PC': 'P'}.get(device_of(r['adgroup'], r['campaign']), r['device'] or 'ALL')
+        grp = '' if str(r['adgroup']).startswith('애셋그룹 ') else r['adgroup']
+        k = (r['date'], r['media'], dev, r['campaign'], grp)
         a = agg.setdefault(k, [0.0] * 5)
         for i, f in enumerate(('imps', 'clicks', 'cost', 'conv', 'revenue')):
             a[i] += float(r[f] or 0)
@@ -47,7 +54,7 @@ def export_daily(rows, path):
     ws.title = 'Msrs Daily'
     ws.append(DAILY_COLS)
     for k in sorted(agg, key=lambda x: (x[0], x[1], x[3], x[4])):
-        ws.append([k[0].strftime('%Y-%m-%d'), k[1], k[2], k[3], k[4]] + [_n(v) for v in agg[k]])
+        ws.append([k[0].strftime('%Y-%m-%d'), k[1], k[2], k[3], k[4] or None] + [_n(v) for v in agg[k]])
     wb.save(path)
     return len(agg)
 

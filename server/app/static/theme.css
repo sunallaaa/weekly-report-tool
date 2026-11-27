@@ -52,9 +52,9 @@ a { color:var(--acc-ink); text-decoration:none; } a:hover { text-decoration:unde
 .panel { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:20px 22px; margin-bottom:16px; box-shadow:var(--shadow); }
 .panel h3 { margin:0 0 14px; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .panel h3 .muted { font-weight:500; }
-.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
-.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; box-shadow:var(--shadow); }
-.card .k { color:var(--sub); font-size:12.5px; font-weight:600; } .card .v { font-size:clamp(17px,1.55vw,22px); font-weight:800; margin-top:6px; letter-spacing:-0.02em; white-space:nowrap; }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; box-shadow:var(--shadow); min-width:0; }
+.card .k { color:var(--sub); font-size:12.5px; font-weight:600; } .card .v { font-size:clamp(17px,1.55vw,22px); font-weight:800; margin-top:6px; letter-spacing:-0.02em; white-space:nowrap; overflow:hidden; }
 .card .t { font-size:12px; color:var(--acc-ink); margin-top:4px; font-weight:600; }
 .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr)); gap:16px; }
 .two .panel { margin-bottom:16px; }

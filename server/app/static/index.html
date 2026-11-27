@@ -246,14 +246,25 @@ function renderAll() {
 }
 
 // ── 실시간 성과 ──
+// 숫자가 칸보다 길면 글자 크기를 줄여 칸 안에 맞춘다 (창 크기 바뀔 때도)
+function fitCards() {
+  document.querySelectorAll('.cards .card .v').forEach(function (el) {
+    el.style.fontSize = '';
+    var size = parseFloat(getComputedStyle(el).fontSize), guard = 0;
+    while (el.scrollWidth > el.clientWidth && size > 12 && guard++ < 30) { size -= 1; el.style.fontSize = size + 'px'; }
+  });
+}
+window.addEventListener('resize', function () { clearTimeout(window._fit); window._fit = setTimeout(fitCards, 120); });
 function card(k, v, t) { return '<div class="card"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (t ? '<div class="t">' + t + '</div>' : '') + '</div>'; }
 function renderPerf() {
   var lv = D.leaves.filter(function (r) { return pass(r, true); });
-  var T = sum(lv), td = D.liveAt ? sum((D.todayBy || []).filter(function (r) { return pass(r, true); })) : null;
+  var T = sum(lv), tdl = D.liveAt ? (D.todayBy || []).filter(function (r) { return pass(r, true); }) : [];
+  var td = tdl.length ? sum(tdl) : null;   // 오늘 실시간은 검색광고(브랜드검색)만 — 없는 선택에는 '오늘' 줄을 숨김
   function tt(v) { return td ? '오늘 ' + v : ''; }
   $('cards').innerHTML = card('노출', n0(T.imps), td && tt(n0(td.imps))) + card('클릭', n0(T.clk), td && tt(n0(td.clk))) +
     card('CTR', n2(T.ctr) + '%') + card('광고비', n0(T.cost) + '원', td && tt(n0(td.cost) + '원')) + card('CPC', n0(T.cpc) + '원') +
     card('구매', n0(T.conv), td && tt(n0(td.conv))) + card('매출', n0(T.rev) + '원', td && tt(n0(td.rev) + '원')) + card('ROAS', n0(T.roas) + '%');
+  fitCards();
   // 예산
   var B = D.budget;
   if (B && B.items && B.items.length) {

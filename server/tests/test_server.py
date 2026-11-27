@@ -568,3 +568,17 @@ def test_budget_status(app_env, monkeypatch):
     assert it[('GFA', 'Conf')]['budget'] == 1500000 and it[('GFA', 'Conf')]['used'] == 100000
     assert it[('BS', 'Pet')]['budget'] == 900000 and b['elapsed'] == round(10 / 30 * 100)
     assert dashboard.budget_status(['*'], date(2026, 10, 25), date(2026, 11, 2), True, []) is None   # 두 달에 걸치면 없음
+
+
+def test_export_daily_matches_mars_daily_format(app_env, tmp_path):
+    from app import report_job
+    d1 = date(2026, 11, 20)
+    rows = [{'date': d1, 'media': 'GFA', 'device': 'ALL', 'campaign': '(Mars Pet) ADVoost 쇼핑', 'adgroup': '애셋그룹 77',
+             'imps': 10, 'clicks': 1, 'cost': 100.5, 'conv': 1, 'revenue': 1000},
+            {'date': d1, 'media': 'NaverBS', 'device': 'ALL', 'campaign': '1. M_마즈코리아_PET_브랜드검색',
+             'adgroup': '1. 시저', 'imps': 5, 'clicks': 1, 'cost': 0, 'conv': 0, 'revenue': 0}]
+    p = str(tmp_path / 'd.xlsx')
+    assert report_job.export_daily(rows, p) == 2
+    got = [r for r in openpyxl.load_workbook(p).active.iter_rows(min_row=2, values_only=True)]
+    assert got[0][:5] == ('2026-11-20', 'GFA', '-', '(Mars Pet) ADVoost 쇼핑', None) and got[0][7] == 100.5
+    assert got[1][:5] == ('2026-11-20', 'NaverBS', 'M', '1. M_마즈코리아_PET_브랜드검색', '1. 시저')
