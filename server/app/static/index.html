@@ -5,95 +5,51 @@
 <title>네이버 광고 대시보드</title>
 <meta charset="utf-8">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="theme.css">
 <style>
-  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --sub:#6b7385; --line:#e3e6ec; --acc:#03c75a; --acc2:#2f6bff; --warn:#e8590c; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
-  header { background:#111827; color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; font-weight:700; }
-  header .live { font-size:12px; color:#9ca3af; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--acc); margin-right:6px; animation:pulse 1.6s infinite; }
-  @keyframes pulse { 50% { opacity:.3; } }
-  nav { display:flex; gap:4px; padding:0 20px; background:#111827; overflow-x:auto; }
-  nav button { background:none; border:0; color:#9ca3af; padding:10px 14px; font-size:14px; cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
-  nav button.on { color:#fff; border-color:var(--acc); }
-  main { padding:16px 20px 40px; max-width:1400px; margin:0 auto; }
   .tab { display:none; } .tab.on { display:block; }
-  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
-  select, input, button.btn, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
-  button.btn { cursor:pointer; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); font-weight:600; }
-  button:disabled { opacity:.5; cursor:wait; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
-  .card .k { color:var(--sub); font-size:12px; } .card .v { font-size:20px; font-weight:700; margin-top:4px; }
-  .card .t { font-size:11px; color:var(--acc2); margin-top:2px; }
-  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
-  .panel h3 { margin:0 0 10px; font-size:15px; }
-  .tbl { overflow-x:auto; }
-  table { border-collapse:collapse; width:100%; font-size:13px; }
-  th, td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
-  th { background:#f8f9fb; color:var(--sub); font-weight:600; position:sticky; top:0; }
-  td.l, th.l { text-align:left; }
-  .up { color:#d6336c; } .down { color:#1c7ed6; }
-  .notice { background:#fff4e6; border:1px solid #ffd8a8; color:#8a4b08; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
-  .err { background:#fff0f0; border:1px solid #ffc9c9; color:#c92a2a; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
-  .muted { color:var(--sub); font-size:12px; }
-  .tag { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--bs); margin-right:6px; animation:pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
   canvas { max-height:340px; }
-  .two { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr)); gap:14px; }
-  .two .panel { margin-bottom:0; }
-  .top3wrap { display:grid; grid-template-columns:minmax(0,1fr); gap:14px; }
-  .chrow { min-width:0; }
-  .chrow h4 { margin:0 0 8px; font-size:14px; }
-  .chrow .items { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr)); gap:10px; max-width:900px; }
-  .citem { border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
-  .citem .img { height:200px; background:#f1f3f5; display:flex; align-items:center; justify-content:center; color:var(--sub); font-size:12px; text-align:center; padding:6px; }
+  tr.lv1 td.l { padding-left:28px; } tr.lv2 td.l { padding-left:48px; } tr.lv3 td.l { padding-left:68px; color:#4b5563; } tr.lv4 td.l { padding-left:90px; color:#6b7280; }
+  .tg { cursor:pointer; user-select:none; } .tg::before { content:"▸ "; color:var(--faint); } .tg.open::before { content:"▾ "; }
+  .bud { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+  .bud .card { box-shadow:none; background:#fbfcfe; }
+  .pbar { height:10px; background:#eef0f4; border-radius:6px; overflow:hidden; margin:10px 0 6px; position:relative; }
+  .pbar i { display:block; height:100%; border-radius:6px; } .pbar b { position:absolute; top:0; width:2px; height:10px; background:var(--ink); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; }
+  .citem { border:1px solid var(--line); border-radius:14px; overflow:hidden; background:#fff; transition:box-shadow .15s; }
+  .citem:hover { box-shadow:0 6px 18px rgba(16,24,40,.08); }
+  .citem .img { height:200px; background:#f3f5f9; display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:12px; text-align:center; padding:6px; }
   .citem .img img { width:100%; height:100%; object-fit:contain; }
-  .citem .b { padding:8px 10px; font-size:12px; }
-  .citem .nm { font-weight:600; font-size:12px; word-break:break-all; margin-bottom:4px; }
-  .rank { display:inline-block; background:#111827; color:#fff; border-radius:4px; padding:0 6px; margin-right:4px; font-size:11px; }
-  a { color:var(--acc2); }
-  @media (max-width:640px) { main { padding:12px; } .card .v { font-size:17px; } }
-details.help{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px}details.help summary{cursor:pointer}details.help ul{margin:6px 0 2px;padding-left:18px}details.help li{margin:3px 0}
-
-  .sub { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
-  .seg { display:inline-flex; background:#e5e7eb; border-radius:8px; padding:3px; flex-wrap:wrap; }
-  .seg button { border:0; background:none; padding:6px 13px; border-radius:6px; cursor:pointer; font:inherit; font-size:13px; color:#374151; }
-  .seg button.on { background:#fff; font-weight:700; box-shadow:0 1px 2px rgba(0,0,0,.12); }
-  .lbl { font-size:12px; color:var(--sub); }
-  .chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; margin-right:4px; font-weight:600; }
-  .c-GFA { background:#efe7ff; color:#7c3aed; } .c-BS { background:#e3f7ec; color:#03a04c; } .c-SA { background:#e7f0ff; color:#2f6bff; }
-  .c-Conf { background:#fde9df; color:#e0662f; } .c-Pet { background:#e4ecfb; color:#3b6fd8; } .c-기타 { background:#eee; color:#555; }
-  tr.lv0 td { font-weight:700; background:#fafafa; } tr.lv1 td.l { padding-left:24px; } tr.lv2 td.l { padding-left:44px; }
-  tr.lv3 td.l { padding-left:64px; color:#4b5563; } tr.lv4 td.l { padding-left:86px; color:#6b7280; }
-  tr.tot td { font-weight:700; background:#f3f4f6; border-top:2px solid #d1d5db; }
-  .tg { cursor:pointer; user-select:none; } .tg::before { content:"▸ "; color:#9ca3af; } .tg.open::before { content:"▾ "; }
-  .bud { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
-  .pbar { height:8px; background:#eef0f3; border-radius:5px; overflow:hidden; margin:6px 0 4px; position:relative; }
-  .pbar i { display:block; height:100%; } .pbar b { position:absolute; top:-2px; width:2px; height:12px; background:#111827; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; }
-  .path { font-size:11px; color:var(--sub); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .cm { display:grid; grid-template-columns:1fr 1fr; gap:1px 8px; color:#4b5563; }
+  .citem .b { padding:10px 12px 12px; font-size:12.5px; }
+  .citem .nm { font-weight:700; font-size:13px; word-break:break-all; margin-bottom:6px; }
+  .path { font-size:11.5px; color:var(--sub); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cm { display:grid; grid-template-columns:1fr 1fr; gap:2px 10px; color:#4b5563; }
+  .filters { padding:16px 20px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>📡 한국마즈 네이버 광고 대시보드</h1>
+<header class="top">
+  <span class="brand"><span class="logo">M</span>한국마즈 네이버 광고</span>
   <span class="live" id="liveInfo"></span>
-  <span style="margin-left:auto;font-size:12px;color:#9ca3af" id="who"></span>
-  <a href="admin" id="adminLink" style="display:none;color:#fff;font-size:13px">관리</a>
-  <a href="#" id="logout" style="color:#9ca3af;font-size:13px">로그아웃</a>
+  <span class="right"><span class="who" id="who"></span><a href="admin" id="adminLink" class="tpill" style="display:none">관리</a><a href="#" id="logout" class="tpill">로그아웃</a></span>
 </header>
-<nav id="menu">
-  <button class="on" data-tab="perf">실시간 성과</button>
-  <button data-tab="creative">소재 성과</button>
-  <button data-tab="bsd">브랜드검색 소재·키워드</button>
-  <button data-tab="trend">키워드 트렌드</button>
-</nav>
-<main>
+<div class="shell">
+<aside class="side">
+  <div class="sh"><b>대시보드</b><span id="asOf"></span></div>
+  <nav class="menu" id="menu">
+    <button class="on" data-tab="perf"><span class="ic">📊</span>실시간 성과</button>
+    <button data-tab="creative"><span class="ic">🖼️</span>소재 성과</button>
+    <button data-tab="bsd"><span class="ic">🔎</span>브랜드검색 소재·키워드</button>
+    <button data-tab="trend"><span class="ic">📈</span>키워드 트렌드</button>
+  </nav>
+</aside>
+<main class="content">
+  <div class="ph"><span class="badge"><b>NAVER</b> 한국마즈</span><h1 id="pageTitle">📊 실시간 성과</h1><p id="pageDesc"></p></div>
   <div id="msg"></div>
 
-  <div id="filters">
+  <div id="filters" class="panel filters">
     <div class="bar">
       <select id="preset">
         <option value="today">오늘 (실시간)</option>
@@ -114,8 +70,8 @@ details.help{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;paddi
       <span id="mediaWrap"><span class="lbl">매체</span> <span class="seg" id="segMedia"><button class="on" data-v="ALL">Total</button><button data-v="GFA">GFA</button><button data-v="BS">NAVER BS</button></span></span>
       <span id="catWrap"><span class="lbl">카테고리</span> <span class="seg" id="segCat"><button class="on" data-v="ALL">전체</button><button data-v="Conf">Conf (스낵)</button><button data-v="Pet">Pet (반려동물)</button></span></span>
     </div>
-    <div id="notice"></div>
-  </div>
+    </div>
+  <div id="notice"></div>
 
   <!-- 실시간 성과 -->
   <section class="tab on" id="tab-perf">
@@ -184,6 +140,7 @@ details.help{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;paddi
   </section>
 
 </main>
+</div>
 <script>
 var charts = {}, autoTimer = null, TODAY = null, D = null, BSD = null, BSD_KEY = '';
 var state = { tab: 'perf', media: 'ALL', cat: 'ALL', brand: '', dev: '' };
@@ -202,11 +159,14 @@ function api(path, opt) {
       return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status)); return j; });
     });
 }
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 function uniq(a) { return a.filter(function (v, i) { return a.indexOf(v) === i; }); }
 function chip(k, label) { return '<span class="chip c-' + esc(k) + '">' + esc(label || k) + '</span>'; }
 function drawChart(id, cfg) {
   if (typeof Chart === 'undefined') { $(id).outerHTML = '<div class="muted" id="' + id + '">차트 라이브러리를 불러오지 못했습니다 (인터넷 연결 확인). 표는 정상입니다.</div>'; return; }
-  if (charts[id]) charts[id].destroy(); charts[id] = new Chart($(id), cfg);
+  if (charts[id]) charts[id].destroy();
+  Chart.defaults.font.family = css('--font') || 'sans-serif'; Chart.defaults.color = '#6b7280';
+  charts[id] = new Chart($(id), cfg);
 }
 // 합계·지표
 function sum(list) {
@@ -231,7 +191,14 @@ document.querySelectorAll('#menu button').forEach(function (b) {
     state.tab = b.dataset.tab; layout(); renderAll();
   };
 });
+var PAGES = {
+  perf: ['📊 실시간 성과', '매체(Total · GFA · NAVER BS)와 카테고리(Conf · Pet)를 골라 매체 › 카테고리 › 캠페인 › 광고그룹 순으로 봅니다.'],
+  creative: ['🖼️ 소재 성과', 'GFA 소재를 이미지와 함께 봅니다. 브랜드검색 소재는 「브랜드검색 소재·키워드」 메뉴에 있습니다.'],
+  bsd: ['🔎 브랜드검색 소재·키워드', '브랜드 › 디바이스별로 소재와 키워드 성과를 봅니다. 광고비는 CPT 계약이라 브랜드 단위로만 계산됩니다.'],
+  trend: ['📈 키워드 트렌드', '네이버 데이터랩 검색 추이와 키워드도구 월간 검색수로 추정 검색량을 봅니다.']
+};
 function layout() {
+  $('pageTitle').textContent = PAGES[state.tab][0]; $('pageDesc').textContent = PAGES[state.tab][1];
   $('filters').style.display = state.tab === 'trend' ? 'none' : '';
   $('mediaWrap').style.display = state.tab === 'perf' ? '' : 'none';
   $('catWrap').style.display = state.tab === 'bsd' ? 'none' : '';
@@ -296,7 +263,7 @@ function renderPerf() {
     $('budget').innerHTML = its.map(function (b) {
       var p = b.budget ? b.used / b.budget * 100 : 0;
       return '<div class="card">' + chip(b.cat, CAT_NAME[b.cat]) + chip(b.media, MEDIA_NAME[b.media]) +
-        '<div class="pbar"><i style="width:' + Math.min(p, 100) + '%;background:' + (b.cat === 'Conf' ? '#e0662f' : '#3b6fd8') + '"></i><b style="left:' + Math.min(B.elapsed, 100) + '%"></b></div>' +
+        '<div class="pbar"><i style="width:' + Math.min(p, 100) + '%;background:var(--' + (b.cat === 'Conf' ? 'conf' : 'pet') + ')"></i><b style="left:' + Math.min(B.elapsed, 100) + '%"></b></div>' +
         '<div class="muted">' + n0(b.used) + ' / ' + n0(b.budget) + '원 · 소진 ' + p.toFixed(0) + '% (기간경과 ' + B.elapsed + '%)</div></div>';
     }).join('');
   } else { $('budgetPanel').style.display = 'none'; }
@@ -315,9 +282,9 @@ function renderPerf() {
   (D.dailyBy || []).filter(function (r) { return pass(r, true); }).forEach(function (r) { (byDate[r.date] = byDate[r.date] || []).push(r); });
   var dates = Object.keys(byDate).sort(), ds = dates.map(function (d) { return sum(byDate[d]); });
   drawChart('chartDaily', { data: { labels: dates.map(function (d) { return d.slice(5); }), datasets: [
-    { type: 'bar', label: '광고비', data: ds.map(function (x) { return x.cost; }), backgroundColor: '#2f6bff', yAxisID: 'y' },
-    { type: 'bar', label: '매출', data: ds.map(function (x) { return x.rev; }), backgroundColor: '#03c75a', yAxisID: 'y' },
-    { type: 'line', label: 'ROAS(%)', data: ds.map(function (x) { return x.roas; }), borderColor: '#e8590c', backgroundColor: '#e8590c', yAxisID: 'y2', tension: .3 }] },
+    { type: 'bar', label: '광고비', data: ds.map(function (x) { return x.cost; }), backgroundColor: css('--c-cost'), borderRadius: 4, yAxisID: 'y' },
+    { type: 'bar', label: '매출', data: ds.map(function (x) { return x.rev; }), backgroundColor: css('--c-rev'), borderRadius: 4, yAxisID: 'y' },
+    { type: 'line', label: 'ROAS(%)', data: ds.map(function (x) { return x.roas; }), borderColor: css('--c-roas'), backgroundColor: css('--c-roas'), yAxisID: 'y2', tension: .3 }] },
     options: { responsive: true, interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } } });
 }
@@ -464,7 +431,7 @@ function parseGroups(text) {
 function drawTrend() {
   var j = lastTrend; if (!j) return;
   var res = j.results || [], est = $('tView').value === 'estimate' && j.estimate;
-  var colors = ['#03c75a', '#2f6bff', '#e8590c', '#ae3ec9', '#f59f00'];
+  var colors = [css('--acc'), css('--bs'), css('--conf'), css('--gfa'), css('--c-roas')];
   drawChart('chartTrend', { type: 'line', data: {
     labels: (res[0] ? res[0].data : []).map(function (p) { return p.period + (p.partial ? ' (진행중)' : ''); }),
     datasets: res.map(function (r, i) { return { label: r.title, data: r.data.map(function (p) { return est ? p.estimate : p.ratio; }),
@@ -515,6 +482,7 @@ $('btnTrendCsv').onclick = function () {
 // 시작
 function kst() { return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); }
 TODAY = kst();
+$('asOf').textContent = TODAY.replace(/-/g, '.') + ' 기준';
 $('tSince').value = addDays(TODAY, -180); $('tUntil').value = addDays(TODAY, -1);
 $('since').value = addDays(TODAY, -14); $('until').value = TODAY;
 layout();

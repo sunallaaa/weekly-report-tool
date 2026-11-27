@@ -4,37 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>관리 · 네이버 광고 대시보드</title>
+<link rel="stylesheet" href="theme.css">
 <style>
-  :root { --bg:#f5f6f8; --card:#fff; --ink:#1d2330; --sub:#6b7385; --line:#e3e6ec; --acc:#03c75a; --acc2:#2f6bff; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif; background:var(--bg); color:var(--ink); font-size:14px; }
-  header { background:#111827; color:#fff; padding:14px 20px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; } header a { color:#9ca3af; font-size:13px; }
-  main { padding:16px 20px 40px; max-width:1200px; margin:0 auto; }
-  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
-  .panel h3 { margin:0 0 10px; font-size:15px; }
-  .bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
-  input, select, button, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
-  button { cursor:pointer; } button.pri { background:var(--acc); color:#fff; border-color:var(--acc); font-weight:600; }
-  button.del { color:#c92a2a; } button:disabled { opacity:.5; cursor:wait; }
-  .tbl { overflow-x:auto; }
-  table { border-collapse:collapse; width:100%; font-size:13px; }
-  th, td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
-  th { background:#f8f9fb; color:var(--sub); font-weight:600; }
-  .muted { color:var(--sub); font-size:12px; line-height:1.6; }
-  .err { background:#fff0f0; border:1px solid #ffc9c9; color:#c92a2a; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
-  .ok { background:#ebfbee; border:1px solid #b2f2bb; color:#2b8a3e; padding:10px 12px; border-radius:8px; margin-bottom:12px; }
-  pre { background:#f8f9fb; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:420px; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-all; }
-  .pill { font-size:11px; padding:2px 6px; border-radius:4px; background:#eef2ff; color:#3b5bdb; }
-  .pill.client { background:#fff4e6; color:#d9480f; } .pill.admin { background:#ebfbee; color:#2b8a3e; } .pill.off { background:#f1f3f5; color:#868e96; }
+  .panel { scroll-margin-top:80px; }
+  th, td { text-align:left; }
+  button.del { color:var(--red); } button { cursor:pointer; }
+  button:not(.pri):not(.btn) { font:inherit; font-size:13.5px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:#fff; color:var(--ink); }
+  button.pri { font:inherit; font-size:13.5px; padding:9px 14px; border-radius:10px; border:1px solid var(--acc); }
+  .pill { font-size:11.5px; padding:2px 9px; border-radius:999px; background:var(--acc-soft); color:var(--acc-ink); font-weight:700; }
+  .pill.client { background:var(--conf-soft); color:var(--conf); } .pill.admin { background:var(--bs-soft); color:var(--bs); } .pill.off { background:#f1f2f5; color:#868e96; }
+  .muted { line-height:1.7; }
 </style>
 </head>
 <body>
-<header><h1>⚙️ 관리</h1><a href="./">← 대시보드</a></header>
-<main>
+<header class="top">
+  <span class="brand"><span class="logo">M</span>한국마즈 네이버 광고</span>
+  <span class="right"><a href="./" class="tpill">대시보드</a><span class="tpill on">관리</span></span>
+</header>
+<div class="shell">
+<aside class="side">
+  <div class="sh"><b>관리</b><span>권한 · 계약 · 수집 설정</span></div>
+  <nav class="menu"><a href="./"><span class="ic">←</span>대시보드로</a><div class="sep"></div><a href="#sec0"><span class="ic">👥</span>접근 권한 (사용자)</a><a href="#sec1"><span class="ic">📝</span>브랜드검색 계약 (CPT)</a><a href="#sec2"><span class="ic">🔄</span>데이터 수집 · 리포트</a><a href="#sec3"><span class="ic">💰</span>월예산 확인</a><a href="#sec4"><span class="ic">🧪</span>검색광고 전환 진단</a><a href="#sec5"><span class="ic">🛰️</span>GFA 탐색</a><a href="#sec6"><span class="ic">🕘</span>변경 기록</a></nav>
+</aside>
+<main class="content">
+  <div class="ph"><span class="badge"><b>NAVER</b> 한국마즈</span><h1>⚙️ 관리</h1><p>접근 권한, 브랜드검색 계약, 데이터 수집과 점검 도구입니다.</p></div>
   <div id="msg"></div>
 
-  <div class="panel">
+  <div class="panel" id="sec0">
     <h3>접근 권한 (사용자)</h3>
     <div class="muted" style="margin-bottom:10px">
       <b>관리자</b>: 전체 + 이 관리 화면 · <b>팀원</b>: 지정 광고주 열람 · <b>광고주</b>: 지정 광고주만 열람, 관리 메뉴 없음.<br>
@@ -51,7 +47,7 @@
     <div class="tbl" id="users"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec1">
     <h3>브랜드검색 계약 (CPT)</h3>
     <div class="muted" style="margin-bottom:10px">계약 기간 동안 노출 여부와 무관하게 매일 <b>계약금액 ÷ 계약일수</b>를 광고비로 계산합니다. 금액은 <b>VAT 제외</b>.</div>
     <div class="bar">
@@ -64,7 +60,7 @@
     <div class="tbl" id="contracts"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec2">
     <h3>데이터 수집 · 리포트</h3>
     <div id="status" class="muted">확인 중…</div>
     <div class="bar" style="margin-top:10px">
@@ -76,31 +72,32 @@
     <div class="tbl" id="jobs" style="margin-top:10px"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec3">
     <h3>월예산 확인 <span class="muted">(구글시트 '월예산' 탭)</span></h3>
     <div class="bar"><input id="bMonth" placeholder="YYYY-MM" size="8"><button id="bLoad">불러오기</button></div>
     <div class="tbl" id="budgets"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec4">
     <h3>검색광고 전환 진단 <span class="muted">(조회만, 저장 안 함 · 최대 31일)</span></h3>
     <div class="muted" style="margin-bottom:8px">전환을 유형(구매완료=purchase 등) · 직접/간접 · 매체별로 나눠 보여줍니다. 리포트 Mars_Daily 의 구매완료 수·매출과 맞는 줄을 찾는 데 씁니다. 1~3분 걸릴 수 있습니다.</div>
     <div class="bar"><input type="date" id="vSince"> ~ <input type="date" id="vUntil"><button class="pri" id="vRun">진단</button></div>
     <div class="tbl" id="vOut"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec5">
     <h3>GFA 탐색 <span class="muted">(게이트웨이 응답 확인 — 조회만, 저장 안 함)</span></h3>
     <div class="muted" style="margin-bottom:8px">성과 조회 경로와 응답 필드명을 확인해 서버 .env 의 GFA_REPORT_PATH / GFA_REPORT_PARAMS / GFA_FIELD_MAP 에 넣습니다. 경로 칸에는 <b>API 경로</b>(예: <code>adAccounts</code>)를 넣고, 광고계정 번호(account_id)는 .env 의 GFA_AD_ACCOUNT_NO 값이 자동으로 붙습니다.</div>
     <div class="bar"><input id="gPath" placeholder="경로 (예: adAccounts)" size="36"><input id="gParams" placeholder='파라미터 JSON (예: {"startDate":"2026-11-01"})' size="40"><button class="pri" id="gRun">조회</button></div>
     <div id="gOut"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="sec6">
     <h3>변경 기록</h3>
     <div class="tbl" id="audit" style="max-height:320px;overflow:auto"></div>
   </div>
 </main>
+</div>
 <script>
 function $(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }

@@ -60,6 +60,11 @@ def index(request: Request):
     return _page('index.html')
 
 
+@app.get('/theme.css')
+def theme_css():
+    return FileResponse(os.path.join(STATIC, 'theme.css'), media_type='text/css', headers={'Cache-Control': 'no-cache'})
+
+
 @app.get('/login')
 def login_page():
     return _page('login.html')
