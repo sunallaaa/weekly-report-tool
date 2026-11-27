@@ -89,14 +89,14 @@
   <section class="tab on" id="tab-perf">
     <div class="cards" id="cards"></div>
     <div class="panel" id="budgetPanel" style="display:none"><h3>카테고리별 예산 소진 <span class="muted" id="budgetLbl"></span></h3><div class="bud" id="budget"></div></div>
+    <div class="panel"><h3 id="treeTitle">성과 상세 <span class="muted">(▸ 를 눌러 펼치기)</span></h3><div class="tbl" id="tree"></div></div>
     <div class="panel" id="rtPanel">
-      <h3>리포트 형식 표 <span class="muted">(매체 › 카테고리 › 상품 › 월별 · 주차별 · 일자별 · 상품 = GFA 채널 / 브랜드검색 브랜드)</span>
+      <h3>기간 별 상세 <span class="muted">(매체 › 카테고리 › 상품 › 월별 · 주차별 · 일자별 · 상품 = GFA 채널 / 브랜드검색 브랜드)</span>
         <input type="month" id="rtMonth" style="margin-left:auto;font-size:13px;padding:6px 10px">
       </h3>
       <div class="muted" id="rtNote" style="margin:-6px 0 10px"></div>
       <div id="rtBody"></div>
     </div>
-    <div class="panel"><h3 id="treeTitle">성과 상세 <span class="muted">(▸ 를 눌러 펼치기)</span></h3><div class="tbl" id="tree"></div></div>
     <div class="panel" id="channelPanel"><h3>GFA 채널별 <span class="muted">(스마트채널·피드 분리 · 리포트 기준)</span></h3><div class="tbl" id="tblChannel"></div></div>
     <div class="panel"><h3>일별 추이</h3><canvas id="chartDaily"></canvas></div>
   </section>
@@ -297,7 +297,7 @@ function renderPerf() {
         '<div class="muted">' + n0(b.used) + ' / ' + n0(b.budget) + '원 · 소진 ' + p.toFixed(0) + '% (기간경과 ' + B.elapsed + '%)</div></div>';
     }).join('');
   } else { $('budgetPanel').style.display = 'none'; }
-  // 리포트 형식 표
+  // 기간 별 상세
   loadReportTables();
   // 트리
   $('treeTitle').innerHTML = (state.media === 'BS' ? '브랜드검색 성과' : '성과 상세') + ' <span class="muted">(▸ 를 눌러 펼치기 · BS 는 캠페인 › 브랜드 › 디바이스)</span>';
@@ -320,7 +320,7 @@ function renderPerf() {
     options: { responsive: true, interaction: { mode: 'index', intersect: false },
       scales: { y: { ticks: { callback: function (v) { return (v / 10000).toLocaleString() + '만'; } } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } } });
 }
-// ── 리포트 형식 표 (월별 · 주차별 · 일자별) ──
+// ── 기간 별 상세 (매체 › 카테고리 › 상품 › 월별 · 주차별 · 일자별) ──
 var RT = null, RT_KEY = '';
 function loadReportTables() {
   var m = $('rtMonth').value || TODAY.slice(0, 7), key = m + '|' + ($('vat').checked ? 1 : 0);
