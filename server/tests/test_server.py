@@ -430,3 +430,44 @@ def test_admin_collect_runs_in_background(app_env, monkeypatch):
     assert done.wait(5)
     main._bg_running['job'].join(5)
     assert c.post('/api/admin/collect', json={'since': '2026-11-01', 'until': '2026-11-01'}).status_code == 200
+
+
+def test_trend_estimate(app_env, monkeypatch):
+    from app import trend, settings
+    monkeypatch.setenv('NAVER_CLIENT_ID', 'id')
+    monkeypatch.setenv('NAVER_CLIENT_SECRET', 'sec')
+    settings.reload()
+    today = date(2026, 11, 27)
+    seen = {}
+
+    def fake_datalab(groups, s, e, unit, device):
+        seen.update(s=s, e=e, unit=unit)
+        out = []
+        for gi, g in enumerate(groups):
+            data, d = [], s
+            while d <= e:
+                data.append({'period': str(d), 'ratio': 10.0 * (gi + 1)})
+                d += timedelta(days=1)
+            out.append({'title': g['name'], 'data': data})
+        return out
+
+    class FakeSA:
+        def get(self, uri, params=None):
+            assert uri == '/keywordstool' and ' ' not in params['hintKeywords']
+            return {'keywordList': [{'relKeyword': '시저강아지', 'monthlyPcQcCnt': 300, 'monthlyMobileQcCnt': 2700},
+                                    {'relKeyword': '시저', 'monthlyPcQcCnt': '< 10', 'monthlyMobileQcCnt': 3000},
+                                    {'relKeyword': '쉬바', 'monthlyPcQcCnt': 100, 'monthlyMobileQcCnt': 500}]}
+
+    monkeypatch.setattr(trend, 'datalab', fake_datalab)
+    groups = [{'name': '시저', 'keywords': ['시저', '시저 강아지']}, {'name': '쉬바', 'keywords': ['쉬바', '없는키워드']}]
+    r = trend.build(groups, date(2026, 11, 2), date(2026, 11, 26), 'week', '', today, FakeSA())
+    assert seen['unit'] == 'date' and seen['s'] == date(2026, 10, 28) and seen['e'] == date(2026, 11, 26)
+    g0 = r['results'][0]
+    # 시저: 30일 검색수 3000+3000=6000, 일별 지표 10 → 하루 200 → 주(7일) 1400
+    assert g0['data'][0] == {'period': '2026-11-02', 'ratio': 50.0, 'estimate': 1400, 'partial': False}
+    assert g0['data'][-1]['period'] == '2026-11-23' and g0['data'][-1]['partial'] is True and g0['data'][-1]['estimate'] == 800
+    assert r['results'][1]['data'][0]['ratio'] == 100.0 and r['results'][1]['data'][0]['estimate'] == 140   # 600/30*7
+    assert r['volumes']['시저']['lt10'] and r['volumes']['없는키워드'].get('missing')
+    # 키워드도구 없이도 상대지표는 나온다
+    r2 = trend.build(groups, date(2026, 11, 2), date(2026, 11, 26), 'week', '', today, None)
+    assert r2['estimate'] is False and r2['results'][0]['data'][0]['estimate'] is None

@@ -54,6 +54,7 @@
   .rank { display:inline-block; background:#111827; color:#fff; border-radius:4px; padding:0 6px; margin-right:4px; font-size:11px; }
   a { color:var(--acc2); }
   @media (max-width:640px) { main { padding:12px; } .card .v { font-size:17px; } }
+details.help{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px}details.help summary{cursor:pointer}details.help ul{margin:6px 0 2px;padding-left:18px}details.help li{margin:3px 0}
 </style>
 </head>
 <body>
@@ -114,20 +115,29 @@
   <!-- 트렌드 -->
   <section class="tab" id="tab-trend">
     <div class="panel">
-      <div class="muted" style="margin-bottom:8px">네이버 데이터랩 검색어 트렌드 · 기간 내 최대 검색량 = 100 기준 상대지표 · 한 줄에 "그룹명: 키워드1, 키워드2" (최대 5줄)</div>
-      <textarea id="groups" rows="5" style="width:100%">그리니즈: 그리니즈
-시저: 시저 강아지, 시저사료
-템테이션: 템테이션 고양이, 템테이션 간식
-쉬바: 쉬바 고양이, 쉬바 파우치
-위스카스: 위스카스</textarea>
+      <details class="help" open>
+        <summary><b>입력 방법과 숫자 계산 방식</b> (눌러서 접기/펼치기)</summary>
+        <ul>
+          <li><b>입력:</b> 한 줄에 그룹 하나 → <code>그룹명: 키워드1, 키워드2</code> (콜론 뒤에 키워드를 쉼표로 구분). 메모장·엑셀에서 복사해 붙여넣어도 됩니다.</li>
+          <li><b>한도:</b> 한 번에 <b>5줄(그룹)</b>, 한 그룹에 <b>키워드 20개</b>까지. 넘치면 조회 전에 알려 드립니다.</li>
+          <li><b>합산:</b> 한 그룹 안의 키워드 검색량은 <b>모두 더해서</b> 선 하나로 그립니다. 키워드별로 따로 보려면 한 줄에 키워드 하나씩 넣으세요.</li>
+          <li><b>상대지표:</b> 네이버 데이터랩 값. 조회한 기간·그룹 중 가장 높은 한 점 = 100 기준 비율입니다 (실제 검색수 아님).</li>
+          <li><b>추정 검색량:</b> 검색광고 키워드도구의 <b>최근 30일 실제 검색수</b>(PC+모바일)를 기준으로, 데이터랩 일별 흐름을 곱해 기간별 검색수를 추정합니다. 키워드도구가 '10 미만'으로 주는 키워드는 0으로 계산합니다 → <b>실제와 오차가 있는 추정치</b>입니다.</li>
+          <li><b>기간:</b> 어제까지 조회됩니다. 다 채워지지 않은 기간(예: 이번 주)은 <b>점선</b>·표에 '(진행중)'으로 표시합니다.</li>
+        </ul>
+      </details>
+      <textarea id="groups" rows="5" style="width:100%;margin-top:8px" placeholder="예시)&#10;시저: 시저, 시저 강아지, 시저사료&#10;강아지 간식: 강아지 간식, 강아지간식&#10;스니커즈: 스니커즈"></textarea>
       <div class="bar" style="margin-top:8px">
         <input type="date" id="tSince"> ~ <input type="date" id="tUntil">
         <select id="tUnit"><option value="date">일</option><option value="week" selected>주</option><option value="month">월</option></select>
         <select id="tDev"><option value="">전체 기기</option><option value="pc">PC</option><option value="mo">모바일</option></select>
+        <select id="tView"><option value="estimate">추정 검색량 (키워드도구 기준)</option><option value="ratio">상대지표 (최대=100)</option></select>
         <button class="btn pri" id="btnTrend">트렌드 조회</button>
+        <button class="btn" id="btnTrendCsv" disabled>엑셀(CSV) 다운로드</button>
       </div>
     </div>
     <div class="panel"><canvas id="chartTrend"></canvas></div>
+    <div class="panel" id="trendTblPanel" style="display:none"><h3>키워드별 최근 30일 검색수 <span class="muted" id="trendBasis"></span></h3><div class="tbl" id="trendTbl"></div></div>
   </section>
 
 </main>
@@ -291,22 +301,72 @@ $('auto').onchange = function () {
 };
 
 // 트렌드
-$('btnTrend').onclick = function () {
-  var groups = $('groups').value.split('\n').map(function (l) {
-    var i = l.indexOf(':'); if (i < 0) return null;
+var lastTrend = null;
+function parseGroups(text) {
+  var bad = [], groups = [];
+  text.split('\n').forEach(function (l, n) {
+    if (!l.trim()) return;
+    var i = l.indexOf(':'); if (i < 0) i = l.indexOf('：');
+    if (i < 0) { bad.push((n + 1) + '번째 줄에 콜론(:)이 없습니다'); return; }
     var kws = l.slice(i + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-    return kws.length ? { name: l.slice(0, i).trim(), keywords: kws } : null;
-  }).filter(Boolean);
+    var name = l.slice(0, i).trim();
+    if (!name || !kws.length) { bad.push((n + 1) + '번째 줄에 그룹명 또는 키워드가 없습니다'); return; }
+    if (kws.length > 20) bad.push('"' + name + '" 키워드가 ' + kws.length + '개입니다 (그룹당 20개까지)');
+    groups.push({ name: name, keywords: kws });
+  });
+  if (groups.length > 5) bad.push('그룹이 ' + groups.length + '줄입니다 (한 번에 5줄까지) — 5줄씩 나눠 조회해 주세요');
+  if (!groups.length && !bad.length) bad.push('키워드를 입력해 주세요');
+  return { groups: groups, bad: bad };
+}
+function drawTrend() {
+  var j = lastTrend; if (!j) return;
+  var res = j.results || [], est = $('tView').value === 'estimate' && j.estimate;
+  var colors = ['#03c75a', '#2f6bff', '#e8590c', '#ae3ec9', '#f59f00'];
+  drawChart('chartTrend', { type: 'line', data: {
+    labels: (res[0] ? res[0].data : []).map(function (p) { return p.period + (p.partial ? ' (진행중)' : ''); }),
+    datasets: res.map(function (r, i) { return { label: r.title, data: r.data.map(function (p) { return est ? p.estimate : p.ratio; }),
+      borderColor: colors[i], backgroundColor: colors[i], tension: .3,
+      segment: { borderDash: function (ctx) { return r.data[ctx.p1DataIndex] && r.data[ctx.p1DataIndex].partial ? [6, 4] : undefined; } } }; })
+  }, options: { interaction: { mode: 'index', intersect: false }, scales: { y: { beginAtZero: true, title: { display: true, text: est ? '추정 검색량 (회)' : '상대 검색량 (최대=100)' } } } } });
+  // 키워드별 30일 검색수 표
+  if (j.estimate) {
+    var L = ' style="text-align:left"';
+    var h = '<table><tr><th' + L + '>그룹</th><th' + L + '>키워드</th><th>PC</th><th>모바일</th><th>합계</th></tr>';
+    res.forEach(function (r) {
+      r.keywords.forEach(function (k, i) {
+        var v = j.volumes[k] || {};
+        h += '<tr><td' + L + '>' + (i ? '' : '<b>' + esc(r.title) + '</b>') + '</td><td' + L + '>' + esc(k) + (v.missing ? ' <span class="muted">(키워드도구 결과 없음)</span>' : v.lt10 ? ' <span class="muted">(10 미만 포함)</span>' : '') +
+          '</td><td>' + n0(v.pc) + '</td><td>' + n0(v.mo) + '</td><td>' + n0(v.total) + '</td></tr>';
+      });
+    });
+    $('trendTbl').innerHTML = h + '</table>';
+    $('trendBasis').textContent = '(검색광고 키워드도구 · ' + j.basis.from + ' ~ ' + j.basis.to + ' 기준 · 그룹 합계로 추정 검색량 계산)';
+    $('trendTblPanel').style.display = '';
+  } else { $('trendTblPanel').style.display = 'none'; }
+}
+$('tView').onchange = drawTrend;
+$('btnTrend').onclick = function () {
+  var p = parseGroups($('groups').value);
+  if (p.bad.length) return showErr(p.bad.join(' / '));
   var b = this; b.disabled = true; clearMsg();
-  api('api/trend', { method: 'POST', body: JSON.stringify({ startDate: $('tSince').value, endDate: $('tUntil').value, timeUnit: $('tUnit').value, groups: groups, device: $('tDev').value }) }).then(function (j) {
-    var res = j.results || [];
-    var colors = ['#03c75a', '#2f6bff', '#e8590c', '#ae3ec9', '#f59f00'];
-    drawChart('chartTrend', { type: 'line', data: {
-      labels: (res[0] ? res[0].data : []).map(function (p) { return p.period; }),
-      datasets: res.map(function (r, i) { return { label: r.title, data: r.data.map(function (p) { return p.ratio; }), borderColor: colors[i], backgroundColor: colors[i], tension: .3 }; })
-    }, options: { interaction: { mode: 'index', intersect: false }, scales: { y: { title: { display: true, text: '상대 검색량 (최대=100)' } } } } });
-  }).catch(function (e) { showErr((e.message || e) + ' — 개발자센터 애플리케이션의 사용 API에 "데이터랩(검색어트렌드)"가 추가되어 있는지 확인해주세요.'); })
+  api('api/trend', { method: 'POST', body: JSON.stringify({ startDate: $('tSince').value, endDate: $('tUntil').value, timeUnit: $('tUnit').value, groups: p.groups, device: $('tDev').value, estimate: true }) }).then(function (j) {
+    lastTrend = j; $('btnTrendCsv').disabled = false; drawTrend();
+    if (j.notice) showErr(j.notice);
+  }).catch(function (e) { showErr(e.message || e); })
     .finally(function () { b.disabled = false; });
+};
+$('btnTrendCsv').onclick = function () {
+  var j = lastTrend; if (!j) return;
+  var rows = [['그룹', '키워드', '기간', '진행중', '상대지표(최대=100)', '추정 검색량', '그룹 최근30일 검색수(키워드도구)', '기기']];
+  (j.results || []).forEach(function (r) {
+    var g = (j.basis.groups || {})[r.title] || {};
+    r.data.forEach(function (p) { rows.push([r.title, r.keywords.join(' + '), p.period, p.partial ? 'Y' : '', p.ratio, p.estimate == null ? '' : p.estimate, g.monthly == null ? '' : g.monthly, j.basis.device]); });
+  });
+  var csv = '\ufeff' + rows.map(function (r) { return r.map(function (c) { c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = '키워드트렌드_' + $('tSince').value + '_' + $('tUntil').value + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
 };
 
 // 시작

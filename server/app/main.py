@@ -157,23 +157,39 @@ class TrendIn(BaseModel):
     timeUnit: str = 'date'
     groups: list
     device: str = ''
+    estimate: bool = True      # 키워드도구 월간 검색수로 추정 검색량 계산
 
 
 @app.post('/api/trend')
 def api_trend(body: TrendIn, u=Depends(auth.require_user)):
-    st = S.settings
-    if not (st.naver_client_id and st.naver_client_secret):
-        raise HTTPException(503, 'NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 미설정')
-    payload = {'startDate': body.startDate, 'endDate': body.endDate, 'timeUnit': body.timeUnit,
-               'keywordGroups': [{'groupName': g.get('name', ''), 'keywords': list(g.get('keywords', []))[:20]}
-                                 for g in body.groups[:5]]}
-    if body.device:
-        payload['device'] = body.device
-    r = requests.post('https://openapi.naver.com/v1/datalab/search', json=payload, timeout=30, headers={
-        'X-Naver-Client-Id': st.naver_client_id, 'X-Naver-Client-Secret': st.naver_client_secret})
-    if r.status_code != 200:
-        raise HTTPException(502, '데이터랩 오류 HTTP {}: {}'.format(r.status_code, r.text[:200]))
-    return r.json()
+    from . import trend
+    groups = [{'name': str(g.get('name') or '').strip()[:40],
+               'keywords': [str(k).strip() for k in g.get('keywords', []) if str(k).strip()]}
+              for g in body.groups if isinstance(g, dict)]
+    groups = [g for g in groups if g['name'] and g['keywords']]
+    if not groups:
+        raise HTTPException(400, '키워드를 입력해 주세요. 한 줄에 "그룹명: 키워드1, 키워드2" 형식입니다.')
+    s, e = _d(body.startDate, None), _d(body.endDate, None)
+    if not (s and e and e >= s):
+        raise HTTPException(400, '기간을 확인해 주세요.')
+    unit = body.timeUnit if body.timeUnit in ('date', 'week', 'month') else 'week'
+    sa = None
+    if body.estimate and S.settings.sa_ready:
+        sa = collectors.sa_client()
+    try:
+        res = trend.build(groups, s, e, unit, body.device if body.device in ('pc', 'mo') else '',
+                          collectors.today(), sa)
+    except trend.TrendError as ex:
+        raise HTTPException(502, str(ex))
+    except Exception as ex:   # 키워드도구 오류여도 상대지표는 보여준다
+        if sa is None:
+            raise HTTPException(502, str(ex)[:300])
+        res = trend.build(groups, s, e, unit, body.device if body.device in ('pc', 'mo') else '',
+                          collectors.today(), None)
+        res['notice'] = '키워드도구 조회 실패로 추정 검색량은 빠졌습니다: {}'.format(str(ex)[:150])
+    if body.estimate and not S.settings.sa_ready:
+        res['notice'] = '검색광고 키가 없어 추정 검색량은 빠졌습니다.'
+    return res
 
 
 _img = {'at': 0, 'map': {}}
