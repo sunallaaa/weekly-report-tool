@@ -306,8 +306,16 @@ def fetch_bs_detail(client, since, until, conv_tsv=None, types=('purchase',), me
         return []
     types = {t.lower() for t in types if t}
     rows = []
+    by_level = {}
+    for iid, v in items.items():
+        by_level.setdefault(v[0], []).append(iid)
     for d in daterange(since, until):
-        st = client.stats(items.keys(), d, d)
+        st = {}
+        for level, ids in by_level.items():   # 네이버 /stats 는 한 번에 같은 종류의 ID만 받는다 (키워드·소재 따로)
+            try:
+                st.update(client.stats(ids, d, d))
+            except SearchAdError as e:
+                notes.append('{} 브랜드검색 {} 통계 실패: {}'.format(d, '키워드' if level == 'keyword' else '소재', str(e)[:80]))
         conv = {}
         tsv = (conv_tsv or {}).get(d)
         if isinstance(tsv, str):

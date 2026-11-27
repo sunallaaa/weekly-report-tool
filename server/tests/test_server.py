@@ -537,7 +537,9 @@ def test_fetch_bs_detail():
                      'ad': {'headline': '시저 메인', 'image': {'url': 'https://img/a.png'}}}]
 
         def stats(self, ids, s, u):
-            return {'k1': {'impCnt': 100, 'clkCnt': 10}, 'a1': {'impCnt': 80, 'clkCnt': 8}}
+            ids = list(ids)
+            assert len({i[0] for i in ids}) == 1, '같은 종류 ID만'   # k… / a… 섞이면 실패
+            return {i: {'k1': {'impCnt': 100, 'clkCnt': 10}, 'a1': {'impCnt': 80, 'clkCnt': 8}}[i] for i in ids}
 
     rows = fetch_bs_detail(C(), date(2026, 11, 2), date(2026, 11, 2), {date(2026, 11, 2): tsv})
     by = {r['item_id']: r for r in rows}
