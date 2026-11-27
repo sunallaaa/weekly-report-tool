@@ -32,7 +32,12 @@
   details.rtg > summary { cursor:pointer; list-style:none; padding:12px 0 6px; font-size:15px; font-weight:800; display:flex; align-items:center; gap:6px; }
   details.rtg > summary::-webkit-details-marker { display:none; }
   details.rtg > summary::before { content:"▸"; color:var(--faint); margin-right:4px; } details.rtg[open] > summary::before { content:"▾"; }
-  details.rtg > summary .sumv { margin-left:auto; font-size:12.5px; font-weight:600; color:var(--sub); }
+  details.rtg > summary .sumv, details.rtp2 > summary .sumv { margin-left:auto; font-size:12.5px; font-weight:600; color:var(--sub); }
+  details.rtp2 { border-top:1px solid var(--line); padding:2px 0 8px; }
+  details.rtp2 > summary { cursor:pointer; list-style:none; padding:10px 4px; font-size:14px; font-weight:800; display:flex; align-items:center; gap:6px; }
+  details.rtp2 > summary::-webkit-details-marker { display:none; }
+  details.rtp2 > summary::before { content:"▸"; color:var(--faint); margin-right:4px; } details.rtp2[open] > summary::before { content:"▾"; }
+  details.rtp2.all > summary { color:var(--acc-ink); }
   tr.rtp td { color:#4b5563; } tr.rtp td.l { padding-left:30px; }
 </style>
 </head>
@@ -85,7 +90,7 @@
     <div class="cards" id="cards"></div>
     <div class="panel" id="budgetPanel" style="display:none"><h3>카테고리별 예산 소진 <span class="muted" id="budgetLbl"></span></h3><div class="bud" id="budget"></div></div>
     <div class="panel" id="rtPanel">
-      <h3>리포트 형식 표 <span class="muted">(매체 › 카테고리 › 월별 · 주차별 · 일자별 · 상품 = GFA 채널 / 브랜드검색 브랜드 · ▸ 를 눌러 상품별 펼치기)</span>
+      <h3>리포트 형식 표 <span class="muted">(매체 › 카테고리 › 상품 › 월별 · 주차별 · 일자별 · 상품 = GFA 채널 / 브랜드검색 브랜드)</span>
         <input type="month" id="rtMonth" style="margin-left:auto;font-size:13px;padding:6px 10px">
       </h3>
       <div class="muted" id="rtNote" style="margin:-6px 0 10px"></div>
@@ -325,21 +330,27 @@ function loadReportTables() {
     .then(function (r) { RT = r; renderReportTables(); })
     .catch(function (e) { $('rtNote').textContent = e.message; });
 }
-function rtTable(rs, labelOf, idp) {
+function rtTable(rs, labelOf) {   // 행 = 기간 (월/주차/일), 같은 기간은 합산
   if (!rs.length) return '<div class="muted">데이터가 없습니다.</div>';
   var periods = uniq(rs.map(function (r) { return r.period; })).sort();
-  var h = '<table><tr><th class="l">기간 › 상품</th>' + HEAD + '</tr>';
-  periods.forEach(function (p, i) {
-    var pr = rs.filter(function (r) { return r.period === p; }), pid = idp + i;
-    h += '<tr class="lv0"><td class="l tg" data-t="' + pid + '">' + labelOf(p, pr[0]) + '</td>' + cells(sum(pr)) + '</tr>';
-    var prods = uniq(pr.map(function (r) { return r.product; }));
-    prods.sort(function (a, b) { return sum(pr.filter(function (r) { return r.product === b; })).cost - sum(pr.filter(function (r) { return r.product === a; })).cost; });
-    prods.forEach(function (k) {
-      h += '<tr class="rtp" data-p="' + pid + '" style="display:none"><td class="l">' + esc(k) + '</td>' + cells(sum(pr.filter(function (r) { return r.product === k; }))) + '</tr>';
-    });
+  var h = '<table><tr><th class="l">기간</th>' + HEAD + '</tr>';
+  periods.forEach(function (p) {
+    var pr = rs.filter(function (r) { return r.period === p; });
+    h += '<tr><td class="l">' + labelOf(p, pr[0]) + '</td>' + cells(sum(pr)) + '</tr>';
   });
   return h + '<tr class="tot"><td class="l">합계</td>' + cells(sum(rs)) + '</tr></table>';
 }
+var RT_LBL = {
+  m: function (p) { return '<b>' + p.replace('-', '년 ') + '월</b>'; },
+  w: function (p, r) { return '<b>' + esc(r.label) + '</b> <span class="muted">' + esc(r.range) + (r.partial ? ' · 일부' : '') + '</span>'; },
+  d: function (p) { var d = new Date(p + 'T00:00:00Z'); return '<b>' + p.slice(5).replace('-', '/') + '</b> <span class="muted">' + '일월화수목금토'[d.getUTCDay()] + '</span>'; }
+};
+function rtBlock(mon, wk, dy) {
+  return '<h4 class="rth">월별 토탈 <span class="muted">(최근 6개월)</span></h4><div class="tbl">' + rtTable(mon, RT_LBL.m) + '</div>' +
+    '<h4 class="rth">주차별 토탈 <span class="muted">(' + RT.month + ')</span></h4><div class="tbl">' + rtTable(wk, RT_LBL.w) + '</div>' +
+    '<h4 class="rth">일자별 토탈 <span class="muted">(' + RT.month + ')</span></h4><div class="tbl" style="max-height:520px;overflow:auto">' + rtTable(dy, RT_LBL.d) + '</div>';
+}
+function sumv(list) { var c = sum(list.filter(function (r) { return r.period === RT.month; })); return '<span class="sumv">' + RT.month + ' 광고비 ' + n0(c.cost) + ' · 매출 ' + n0(c.rev) + ' · ROAS ' + n0(c.roas) + '%</span>'; }
 function renderReportTables() {
   if (!RT) return;
   $('rtNote').textContent = RT.month + ' 기준 · 데이터 ~' + RT.until + ' · 광고비 ' + ($('vat').checked ? 'VAT 제외' : 'VAT 포함') + ' · 브랜드검색 광고비는 CPT 계약 일할';
@@ -347,19 +358,22 @@ function renderReportTables() {
   var order = ['GFA', 'BS', 'SA'], catOrder = ['Conf', 'Pet', '기타'], combos = [];
   uniq(all.map(function (r) { return r.media + '|' + r.cat; })).forEach(function (k) { combos.push(k.split('|')); });
   combos.sort(function (a, b) { return (order.indexOf(a[0]) - order.indexOf(b[0])) || (catOrder.indexOf(a[1]) - catOrder.indexOf(b[1])); });
-  var h = '', n = 0;
+  var h = '';
   combos.forEach(function (mc, gi) {
-    function of(list) { return list.filter(function (r) { return r.media === mc[0] && r.cat === mc[1]; }); }
-    var mon = of(RT.monthly), wk = of(RT.weekly), dy = of(RT.daily), cur = sum(of(RT.monthly).filter(function (r) { return r.period === RT.month; }));
-    h += '<details class="rtg"' + (gi === 0 ? ' open' : '') + '><summary>' + chip(mc[0], MEDIA_NAME[mc[0]]) + chip(mc[1], CAT_NAME[mc[1]]) +
-      '<span class="sumv">' + RT.month + ' 광고비 ' + n0(cur.cost) + ' · 매출 ' + n0(cur.rev) + ' · ROAS ' + n0(cur.roas) + '%</span></summary>' +
-      '<h4 class="rth">월별 토탈 <span class="muted">(최근 6개월)</span></h4><div class="tbl">' + rtTable(mon, function (p) { return '<b>' + p.replace('-', '년 ') + '월</b>'; }, 'rm' + gi + '_') + '</div>' +
-      '<h4 class="rth">주차별 토탈 <span class="muted">(' + RT.month + ')</span></h4><div class="tbl">' + rtTable(wk, function (p, r) { return '<b>' + esc(r.label) + '</b> <span class="muted">' + esc(r.range) + (r.partial ? ' · 일부' : '') + '</span>'; }, 'rw' + gi + '_') + '</div>' +
-      '<h4 class="rth">일자별 토탈 <span class="muted">(' + RT.month + ')</span></h4><div class="tbl" style="max-height:520px;overflow:auto">' + rtTable(dy, function (p) { var d = new Date(p + 'T00:00:00Z'); return '<b>' + p.slice(5).replace('-', '/') + '</b> <span class="muted">' + '일월화수목금토'[d.getUTCDay()] + '</span>'; }, 'rd' + gi + '_') + '</div>' +
-      '</details>';
+    function of(list, prod) { return list.filter(function (r) { return r.media === mc[0] && r.cat === mc[1] && (!prod || r.product === prod); }); }
+    var mon = of(RT.monthly);
+    // 상품 순서: 선택 월 광고비 큰 순
+    var prods = uniq(of(RT.monthly).concat(of(RT.weekly), of(RT.daily)).map(function (r) { return r.product; }));
+    prods.sort(function (a, b) { return sum(of(RT.monthly, b).filter(function (r) { return r.period === RT.month; })).cost - sum(of(RT.monthly, a).filter(function (r) { return r.period === RT.month; })).cost; });
+    h += '<details class="rtg"' + (gi === 0 ? ' open' : '') + '><summary>' + chip(mc[0], MEDIA_NAME[mc[0]]) + chip(mc[1], CAT_NAME[mc[1]]) + sumv(mon) + '</summary>';
+    h += '<details class="rtp2 all"><summary>전체 (상품 합계)' + sumv(mon) + '</summary>' + rtBlock(mon, of(RT.weekly), of(RT.daily)) + '</details>';
+    prods.forEach(function (pd) {
+      var pm = of(RT.monthly, pd);
+      h += '<details class="rtp2"><summary>' + esc(pd) + sumv(pm) + '</summary>' + rtBlock(pm, of(RT.weekly, pd), of(RT.daily, pd)) + '</details>';
+    });
+    h += '</details>';
   });
   $('rtBody').innerHTML = h || '<div class="muted">데이터가 없습니다.</div>';
-  $('rtBody').querySelectorAll('.tbl').forEach(function (el) { bindTree(el); });
 }
 $('rtMonth').onchange = loadReportTables;
 
